@@ -1,0 +1,21 @@
+# Gehoert in den Ordner ".streamlit" neben app.py.
+# Erzwingt ein helles Design - sonst nutzt Streamlit bei Geraeten im Dunkelmodus
+# helle Schriftfarben, die auf den hellen Glasflaechen der App unlesbar sind.
+
+[theme]
+base = "light"
+primaryColor = "#1E7A46"
+backgroundColor = "#EDF2F7"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#16253B"
+
+[client]
+toolbarMode = "minimal"
+
+[browser]
+gatherUsageStats = false
+
+[server]
+# Damit Handys im selben Netz die App erreichen koennen:
+#   python3 -m streamlit run app.py --server.address 0.0.0.0
+maxUploadSize = 20
