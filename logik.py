@@ -423,13 +423,19 @@ def urlaubskonto(urlaub_pro_jahr: int, resturlaub_vorjahr: int,
     )
 
 
+# Status, bei denen eine Abwesenheit nicht mehr zählt. Eine Stornierung wirkt wie
+# eine Ablehnung: Der Eintrag bleibt in der Historie sichtbar, belegt den Tag aber
+# nicht mehr und gilt nicht als Überschneidung.
+STATUS_UNWIRKSAM = frozenset({"Abgelehnt", "Storniert"})
+
+
 def abwesend_an(abwesenheiten: list, tag: date, nur_genehmigt: bool = False) -> list:
     """Alle Abwesenheiten, die diesen Tag berühren."""
     treffer = []
     for abw in abwesenheiten or []:
         if nur_genehmigt and abw.status != "Genehmigt":
             continue
-        if abw.status in ("Abgelehnt", "Storniert"):
+        if abw.status in STATUS_UNWIRKSAM:
             continue
         if not isinstance(abw.start, date) or not isinstance(abw.ende, date):
             continue
@@ -446,7 +452,7 @@ def abwesenheits_ueberschneidungen(eintraege: list) -> list:
     """
     belegung: dict = {}
     for name, abw in eintraege or []:
-        if abw.status == "Abgelehnt":
+        if abw.status in STATUS_UNWIRKSAM:
             continue
         if not isinstance(abw.start, date) or not isinstance(abw.ende, date):
             continue

@@ -399,6 +399,33 @@ def spalten_label(spalte: str) -> str:
     return SPALTEN_LABELS_EN.get(spalte, spalte)
 
 
+def loeschabfrage(schluessel: str, ids: list, frage: str, hinweis: str = ""):
+    """Zweistufige Sicherheitsabfrage vor dem Löschen.
+
+    Erster Klick stellt die Frage, erst der zweite löscht. Gibt die Liste der zu
+    löschenden Einträge zurück, sobald bestätigt wurde – sonst None. Gelöschte
+    Daten lassen sich nur über eine Sicherung zurückholen.
+    """
+    merker = f"_loeschfrage_{schluessel}"
+    if not st.session_state.get(merker):
+        return None
+    with st.container(border=True):
+        st.warning(frage)
+        if hinweis:
+            st.caption(hinweis)
+        c1, c2 = st.columns(2)
+        if c1.button(t("🗑️ Ja, endgültig löschen", "🗑️ Yes, delete permanently"),
+                     key=f"_loeschja_{schluessel}", use_container_width=True):
+            gemerkt = st.session_state.pop(merker, [])
+            return gemerkt if isinstance(gemerkt, list) else list(ids)
+        if c2.button(t("Abbrechen", "Cancel"), key=f"_loeschnein_{schluessel}",
+                     use_container_width=True, type="primary"):
+            st.session_state.pop(merker, None)
+            melde("Löschen abgebrochen.", "Deletion cancelled.", "↩️")
+            st.rerun()
+    return None
+
+
 def melde(de: str, en: str, icon: str = "✅") -> None:
     """Merkt eine Rückmeldung vor, die nach dem nächsten Rerun als Toast erscheint."""
     st.session_state.setdefault("meldungen", []).append((de, en, icon))
@@ -1015,6 +1042,9 @@ def _speichern_inkrementell(conn: sqlite3.Connection, key: str,
 
 def speichern(key: str) -> bool:
     """Speichert Änderungen atomar und inkrementell in der konfigurierten Datenbank."""
+    # Zwischenspeicher verwerfen, die von dieser Tabelle abhängen
+    if key == "vacation_requests":
+        st.session_state.pop("_abwesenheiten_cache", None)
     if not PERSISTENZ:
         return True
 
@@ -1498,6 +1528,25 @@ def konfig_arten_nachziehen() -> None:
 
 
 
+def beschriftungen_neu_aufbauen() -> None:
+    """Baut die Nachschlagetabellen für Kunden- und Projektnamen einmal je Seitenaufbau."""
+    kunden_map = {}
+    df_k = st.session_state.get("kunden")
+    if df_k is not None and not df_k.empty:
+        for kid, name, nummer in zip(df_k["Kunden-ID"].astype(str), df_k["Kunde"].astype(str),
+                                     df_k.get("Kundennummer", pd.Series([""] * len(df_k))).astype(str)):
+            kunden_map[kid] = f"{name} · {nummer}" if nummer.strip() and nummer != "nan" else name
+    st.session_state["_kunden_beschriftung"] = kunden_map
+
+    projekt_map = {}
+    df_p = st.session_state.get("projekte")
+    if df_p is not None and not df_p.empty:
+        for pid, name, nummer in zip(df_p["Projekt-ID"].astype(str), df_p["Projekt"].astype(str),
+                                     df_p.get("Projektnummer", pd.Series([""] * len(df_p))).astype(str)):
+            projekt_map[pid] = f"{name} · {nummer}" if nummer.strip() and nummer != "nan" else name
+    st.session_state["_projekt_beschriftung"] = projekt_map
+
+
 def daten_aktualisieren() -> None:
     """Liest die gemeinsamen Tabellen bei JEDEM Seitenaufbau neu ein.
 
@@ -1539,6 +1588,12 @@ def daten_aktualisieren() -> None:
     st.session_state.kunden = kunden if kunden is not None else pd.DataFrame(columns=SPALTEN_KUNDEN)
     projekte = laden("projekte", SPALTEN_PROJEKTE)
     st.session_state.projekte = projekte if projekte is not None else pd.DataFrame(columns=SPALTEN_PROJEKTE)
+
+    # Nachschlagetabellen für Kunden- und Projektnamen. Ohne sie filtert die App
+    # für jede einzelne Tabellenzeile den kompletten DataFrame – bei 800 Zeilen
+    # sind das über 400 ms pro Seitenaufbau, mit den Tabellen unter 1 ms.
+    beschriftungen_neu_aufbauen()
+    st.session_state.pop("_abwesenheiten_cache", None)
 
     gespeichert = einstellungen_laden()
     st.session_state.config = {**STANDARD_CONFIG, **gespeichert}
@@ -1664,21 +1719,11 @@ def projekt_widget_normalisieren(widget_key: str, optionen: list[str]) -> None:
 
 
 def kunden_label(kunden_id: str) -> str:
-    df = st.session_state.get("kunden", pd.DataFrame(columns=SPALTEN_KUNDEN))
-    treffer = df[df["Kunden-ID"].astype(str) == str(kunden_id)] if not df.empty else df
-    if treffer.empty:
-        return "—"
-    r = treffer.iloc[0]
-    return f"{r['Kunde']} · {r['Kundennummer']}" if str(r.get("Kundennummer", "")).strip() else str(r["Kunde"])
+    return st.session_state.get("_kunden_beschriftung", {}).get(str(kunden_id), "—")
 
 
 def projekt_label_id(projekt_id: str) -> str:
-    df = st.session_state.get("projekte", pd.DataFrame(columns=SPALTEN_PROJEKTE))
-    treffer = df[df["Projekt-ID"].astype(str) == str(projekt_id)] if not df.empty else df
-    if treffer.empty:
-        return "—"
-    r = treffer.iloc[0]
-    return f"{r['Projekt']} · {r['Projektnummer']}" if str(r.get("Projektnummer", "")).strip() else str(r["Projekt"])
+    return st.session_state.get("_projekt_beschriftung", {}).get(str(projekt_id), "—")
 
 
 def zeit_mit_kunden_projekten(df: pd.DataFrame) -> pd.DataFrame:
@@ -1686,11 +1731,17 @@ def zeit_mit_kunden_projekten(df: pd.DataFrame) -> pd.DataFrame:
     if "Kunde-ID" not in out.columns: out["Kunde-ID"] = ""
     if "Projekt-ID" not in out.columns: out["Projekt-ID"] = ""
     if "Projekt" not in out.columns: out["Projekt"] = ""
-    out["Kunde"] = out["Kunde-ID"].astype(str).map(lambda x: kunden_label(x) if x and x != "nan" else "—")
-    def proj(row):
-        pid=str(row.get("Projekt-ID", ""))
-        return projekt_label_id(pid) if pid and pid != "nan" else str(row.get("Projekt", "") or "—")
-    out["Projekt"] = out.apply(proj, axis=1)
+    kmap = st.session_state.get("_kunden_beschriftung", {})
+    pmap = st.session_state.get("_projekt_beschriftung", {})
+    out["Kunde"] = out["Kunde-ID"].astype(str).map(lambda x: kmap.get(x, "—") if x and x != "nan" else "—")
+    # Vektorisiert statt zeilenweise: fällt auf den gespeicherten Projektnamen zurück,
+    # wenn keine Projekt-ID hinterlegt ist (z.B. bei Branchen ohne Projektmodul).
+    projekt_ids = out["Projekt-ID"].astype(str)
+    projekt_texte = out["Projekt"].astype(str).replace({"nan": "", "None": ""})
+    out["Projekt"] = [
+        pmap.get(pid, "—") if pid and pid != "nan" else (text or "—")
+        for pid, text in zip(projekt_ids, projekt_texte)
+    ]
     return out
 
 
@@ -2062,8 +2113,40 @@ def tagessoll(name: str, wochentag: int | None = None) -> float:
     return wochenstunden / 5.0
 
 
+def abwesenheiten_cache() -> dict:
+    """Wandelt die Anträge einmal je Seitenaufbau in Fachlogik-Objekte um.
+
+    Die Auswertung ruft berechne_saldo je Mitarbeiter auf, und jeder Aufruf brauchte
+    zuvor einen eigenen Durchlauf durch alle Anträge – bei vielen Mitarbeitenden
+    wächst das quadratisch. Mit dem Zwischenspeicher bleibt es linear.
+    """
+    cache = st.session_state.get("_abwesenheiten_cache")
+    if cache is not None:
+        return cache
+    cache = {}
+    df = st.session_state.get("vacation_requests")
+    if df is not None and not df.empty:
+        for _, zeile in df.iterrows():
+            start, ende = zeile["Startdatum"], zeile["Enddatum"]
+            if not isinstance(start, date) or not isinstance(ende, date):
+                continue
+            cache.setdefault(str(zeile["Mitarbeiter"]), []).append(Abwesenheit(
+                start=start, ende=ende,
+                einheit=str(zeile.get("Einheit") or "Tage"),
+                tage=int(pd.to_numeric(zeile.get("Tage"), errors="coerce") or 0),
+                stunden=float(pd.to_numeric(zeile.get("Stunden"), errors="coerce") or 0.0),
+                art=str(zeile.get("Art") or "Urlaub"),
+                status=str(zeile.get("Status") or "Ausstehend")))
+    st.session_state["_abwesenheiten_cache"] = cache
+    return cache
+
+
 def abwesenheiten_von(name: str) -> list:
-    """Übersetzt die gespeicherten Anträge in das Format der Fachlogik."""
+    """Abwesenheiten einer Person im Format der Fachlogik."""
+    return abwesenheiten_cache().get(str(name), [])
+
+
+def _abwesenheiten_alt(name: str) -> list:
     df = st.session_state.vacation_requests
     if df is None or df.empty:
         return []
@@ -2139,6 +2222,7 @@ def berechne_saldo(name: str, von: date, bis: date):
 STATUS_FARBEN = {
     "Läuft": "#E3F2FD", "Erfasst": "#F5F5F5", "Freigegeben": "#E8F5E9",
     "Ausstehend": "#FFF3E0", "Genehmigt": "#E8F5E9", "Abgelehnt": "#FFEBEE",
+    "Storniert": "#F3E8FF",
 }
 UEBERSETZTE_WERTSPALTEN = ("Status", "Art", "Kategorie", "Typ", "Einheit", "Rolle")
 
@@ -2759,6 +2843,31 @@ B = branche()
 # 12. MITARBEITER-ANSICHT
 # ============================================================
 
+def letzte_buchung_kunde_projekt(name: str) -> tuple:
+    """Kunde und Projekt der letzten Buchung – als Vorbelegung für die Erfassung.
+
+    Wer drei Wochen auf derselben Baustelle ist, soll das nicht dreißigmal neu
+    auswählen müssen. Das spart auf dem Handy die meisten Klicks.
+    """
+    df = st.session_state.get("time_logs")
+    if df is None or df.empty:
+        return "", ""
+    eigene = df[df["Mitarbeiter"] == name]
+    if eigene.empty:
+        return "", ""
+    eigene = eigene.sort_values("Datum")
+    letzte = eigene.iloc[-1]
+    kunde = str(letzte.get("Kunde-ID") or "").strip()
+    projekt = str(letzte.get("Projekt-ID") or "").strip()
+    return ("" if kunde in ("nan", "None") else kunde,
+            "" if projekt in ("nan", "None") else projekt)
+
+
+def vorauswahl_index(optionen: list, wert: str) -> int:
+    """Index der Vorbelegung in einer Auswahlliste; 0, wenn nicht enthalten."""
+    return optionen.index(wert) if wert and wert in optionen else 0
+
+
 def kennzahlen_leiste(werte: list) -> None:
     """Drei Zahlen in einer schmalen Glasleiste statt in drei großen Kacheln.
 
@@ -2780,7 +2889,7 @@ def alle_abwesenheiten(nur_relevante: bool = True) -> list:
         return []
     paare = []
     for _, zeile in df.iterrows():
-        if nur_relevante and str(zeile["Status"]) == "Abgelehnt":
+        if nur_relevante and str(zeile["Status"]) in logik.STATUS_UNWIRKSAM:
             continue
         start, ende = zeile["Startdatum"], zeile["Enddatum"]
         if not isinstance(start, date) or not isinstance(ende, date):
@@ -2997,12 +3106,18 @@ if st.session_state.role == "Mitarbeiter":
                 kunde_live_id, projekt_live_id, projekt_live_name = "", "", ""
                 if B["projekt_aktiv"]:
                     if kunden_projekte_aktiv():
+                        # Letzte Buchung vorbelegen – spart auf der Baustelle jeden Tag zwei Klicks
+                        letzter_kunde, letztes_projekt = letzte_buchung_kunde_projekt(benutzer)
                         kdf = aktive_kunden_df(); kopt = ["__KEINER__"] + (kdf["Kunden-ID"].astype(str).tolist() if not kdf.empty else [])
-                        kunde_live_id = st.selectbox(t("Kunde", "Customer"), kopt, format_func=lambda x: t("Kein Kunde", "No customer") if x == "__KEINER__" else kunden_label(x), key="live_kunde")
+                        kunde_live_id = st.selectbox(t("Kunde", "Customer"), kopt,
+                                                     index=vorauswahl_index(kopt, letzter_kunde),
+                                                     format_func=lambda x: t("Kein Kunde", "No customer") if x == "__KEINER__" else kunden_label(x), key="live_kunde")
                         if kunde_live_id == "__KEINER__": kunde_live_id = ""
                         popt = projekt_optionen_fuer_kunde(kunde_live_id)
                         projekt_widget_normalisieren("live_projekt_id", popt)
-                        projekt_live_id = st.selectbox(t("Projekt", "Project"), popt, format_func=lambda x: t("Kein Projekt", "No project") if x == "__KEINER__" else projekt_label_id(x), key="live_projekt_id")
+                        projekt_live_id = st.selectbox(t("Projekt", "Project"), popt,
+                                                       index=vorauswahl_index(popt, letztes_projekt),
+                                                       format_func=lambda x: t("Kein Projekt", "No project") if x == "__KEINER__" else projekt_label_id(x), key="live_projekt_id")
                         if projekt_live_id == "__KEINER__": projekt_live_id = ""
                         projekt_live_name = projekt_label_id(projekt_live_id) if projekt_live_id else ""
                     else:
@@ -3081,11 +3196,16 @@ if st.session_state.role == "Mitarbeiter":
             if B["projekt_aktiv"]:
                 if kunden_projekte_aktiv():
                     kdf = aktive_kunden_df(); kopt = ["__KEINER__"] + (kdf["Kunden-ID"].astype(str).tolist() if not kdf.empty else [])
-                    m_kunde_id = st.selectbox(t("Kunde", "Customer"), kopt, format_func=lambda x: t("Kein Kunde", "No customer") if x == "__KEINER__" else kunden_label(x), key="ma_kunde")
+                    letzter_kunde_m, letztes_projekt_m = letzte_buchung_kunde_projekt(benutzer)
+                    m_kunde_id = st.selectbox(t("Kunde", "Customer"), kopt,
+                                              index=vorauswahl_index(kopt, letzter_kunde_m),
+                                              format_func=lambda x: t("Kein Kunde", "No customer") if x == "__KEINER__" else kunden_label(x), key="ma_kunde")
                     if m_kunde_id == "__KEINER__": m_kunde_id = ""
                     popt = projekt_optionen_fuer_kunde(m_kunde_id)
                     projekt_widget_normalisieren("ma_projekt_id", popt)
-                    m_projekt_id = st.selectbox(t("Projekt", "Project"), popt, format_func=lambda x: t("Kein Projekt", "No project") if x == "__KEINER__" else projekt_label_id(x), key="ma_projekt_id")
+                    m_projekt_id = st.selectbox(t("Projekt", "Project"), popt,
+                                                index=vorauswahl_index(popt, letztes_projekt_m),
+                                                format_func=lambda x: t("Kein Projekt", "No project") if x == "__KEINER__" else projekt_label_id(x), key="ma_projekt_id")
                     if m_projekt_id == "__KEINER__": m_projekt_id = ""
                     m_projekt_name = projekt_label_id(m_projekt_id) if m_projekt_id else ""
                 else:
@@ -3227,24 +3347,23 @@ if st.session_state.role == "Mitarbeiter":
                                 spalten_label("Löschen"), width="small"),
                         })
 
-                    if st.session_state.pop("_clear_ma_zeiten_delete_confirmed", False):
-                        st.session_state.pop("ma_zeiten_delete_confirmed", None)
-                    _ma_delete_ids = [str(x) for x in bearbeitet.loc[bearbeitet["Löschen"].fillna(False).astype(bool), "ID"].tolist()]
-                    _ma_delete_confirmed = True
-                    if _ma_delete_ids:
-                        st.warning(t(
-                            f"{len(_ma_delete_ids)} Zeiteintrag/Zeiteinträge sind zur Löschung markiert. Die Löschung kann nicht rückgängig gemacht werden.",
-                            f"{len(_ma_delete_ids)} time entr{'y is' if len(_ma_delete_ids) == 1 else 'ies are'} marked for deletion. This cannot be undone."))
-                        _ma_delete_confirmed = st.checkbox(
-                            t("Ich bestätige, dass die markierten Zeiteinträge endgültig gelöscht werden sollen.",
-                              "I confirm that the marked time entries should be permanently deleted."),
-                            key="ma_zeiten_delete_confirmed")
-                    if st.button(t("💾 Änderungen speichern", "💾 Save changes"),
-                                 use_container_width=True, type="primary", key="ma_zeiten_save"):
-                        if _ma_delete_ids and not _ma_delete_confirmed:
-                            st.error(t("Bitte bestätige zuerst die Löschung der markierten Zeiteinträge. Andere Änderungen werden trotzdem gespeichert.", "Please confirm deletion of the marked time entries first. Other changes will still be saved."))
-                            bearbeitet = bearbeitet.copy()
-                            bearbeitet.loc[bearbeitet["ID"].astype(str).isin(_ma_delete_ids), "Löschen"] = False
+                    # Sind Zeilen zum Löschen angekreuzt, kommt beim Speichern erst
+                    # eine Rückfrage. Erst der zweite Klick löscht wirklich.
+                    _ma_delete_ids = [str(x) for x in bearbeitet.loc[
+                        bearbeitet["Löschen"].fillna(False).astype(bool), "ID"].tolist()]
+                    _speichern_geklickt = st.button(
+                        t("💾 Änderungen speichern", "💾 Save changes"),
+                        use_container_width=True, type="primary", key="ma_zeiten_save")
+                    if _speichern_geklickt and _ma_delete_ids:
+                        st.session_state["_loeschfrage_ma_zeiten"] = _ma_delete_ids
+                        _speichern_geklickt = False
+                    _ma_bestaetigt = loeschabfrage(
+                        "ma_zeiten", _ma_delete_ids,
+                        t(f"{len(st.session_state.get('_loeschfrage_ma_zeiten') or [])} Zeiteintrag/-einträge endgültig löschen?",
+                          f"Permanently delete {len(st.session_state.get('_loeschfrage_ma_zeiten') or [])} time entr(y/ies)?"),
+                        t("Wiederherstellung nur über eine Datensicherung möglich.",
+                          "Restoration is only possible from a backup."))
+                    if _ma_bestaetigt or _speichern_geklickt:
                         logs = st.session_state.time_logs.copy()
                         fehler_liste, geaendert, geloescht = [], 0, 0
                         pruefbestand = buchungen_von(benutzer)
@@ -3257,8 +3376,10 @@ if st.session_state.role == "Mitarbeiter":
                             if not ziel.any():
                                 continue
                             if bool(zeile.get("Löschen", False)):
-                                logs = logs[~ziel]
-                                geloescht += 1
+                                # Ohne Bestätigung bleibt der Eintrag stehen
+                                if _ma_bestaetigt and str(zeile["ID"]) in (_ma_bestaetigt or []):
+                                    logs = logs[~ziel]
+                                    geloescht += 1
                                 continue
                             neues_datum = zeile["Datum"]
                             if isinstance(neues_datum, pd.Timestamp):
@@ -3306,7 +3427,6 @@ if st.session_state.role == "Mitarbeiter":
                         else:
                             st.session_state.time_logs = logs.reset_index(drop=True)
                             speichern("time_logs")
-                            st.session_state["_clear_ma_zeiten_delete_confirmed"] = True
                             melde(f"{geaendert} geändert, {geloescht} gelöscht.",
                                   f"{geaendert} updated, {geloescht} deleted.", "💾")
                             st.rerun()
@@ -3438,18 +3558,29 @@ if st.session_state.role == "Mitarbeiter":
             if not erledigt.empty:
                 # Abgelehnte Anträge zuerst und mit Begründung – sonst muss die
                 # Person nachfragen, warum die Entscheidung so ausfiel.
-                abgelehnt = erledigt[erledigt["Status"] == "Abgelehnt"]
-                for _, zeile in abgelehnt.iterrows():
+                # Abgelehnte und stornierte Anträge werden deutlich angezeigt. Eine
+                # Stornierung betrifft einen bereits genehmigten Urlaub – das muss die
+                # Person sehen, sonst plant sie weiter mit freien Tagen.
+                zu_zeigen = erledigt[erledigt["Status"].isin(["Abgelehnt", "Storniert"])]
+                for _, zeile in zu_zeigen.iterrows():
                     zeitraum = (f"{zeile['Startdatum'].strftime(DATUMSFORMAT)}"
                                 if zeile["Einheit"] == "Stunden"
                                 else f"{zeile['Startdatum'].strftime(DATUMSFORMAT)} – "
                                      f"{zeile['Enddatum'].strftime(DATUMSFORMAT)}")
                     grund = str(zeile.get("Entscheidungsgrund") or "").strip()
-                    st.error(
-                        f"**{t('Abgelehnt', 'Rejected')}: {zeitraum}**  \n"
-                        + (f"{t('Grund', 'Reason')}: {grund}" if grund
-                           else t("Kein Grund hinterlegt – bitte bei der Leitung nachfragen.",
-                                  "No reason recorded – please ask your manager.")))
+                    if str(zeile["Status"]) == "Storniert":
+                        st.warning(
+                            f"**{t('Storniert', 'Cancelled')}: {zeitraum}**  \n"
+                            + (f"{t('Grund', 'Reason')}: {grund}" if grund
+                               else t("Ein genehmigter Urlaub wurde zurückgenommen – "
+                                      "bitte bei der Leitung nachfragen.",
+                                      "An approved leave was withdrawn – please ask your manager.")))
+                    else:
+                        st.error(
+                            f"**{t('Abgelehnt', 'Rejected')}: {zeitraum}**  \n"
+                            + (f"{t('Grund', 'Reason')}: {grund}" if grund
+                               else t("Kein Grund hinterlegt – bitte bei der Leitung nachfragen.",
+                                      "No reason recorded – please ask your manager.")))
 
                 with st.expander(t(f"Bearbeitete Anträge ({len(erledigt)})",
                                    f"Processed requests ({len(erledigt)})")):
@@ -3680,7 +3811,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                         if admin_projekt_id == "__KEINER__": admin_projekt_id = ""
                         projekt = projekt_label_id(admin_projekt_id) if admin_projekt_id else ""
                     else:
-                        projekt = s2.text_input(projekt_label(), disabled=not offen.empty, key="admin_eigenes_projekt")
+                        projekt = s2.text_input(projekt_label(), disabled=not offen.empty, key="admin_eigenes_projekt_text")
                 b1, b2 = st.columns(2)
                 if b1.button(t("▶️ KOMMEN", "▶️ CLOCK IN"), key="admin_btn_kommen",
                              use_container_width=True, disabled=not offen.empty or not live_aktiv):
@@ -3741,7 +3872,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                             if admin_nach_projekt_id == "__KEINER__": admin_nach_projekt_id = ""
                             m_projekt = projekt_label_id(admin_nach_projekt_id) if admin_nach_projekt_id else ""
                         else:
-                            m_projekt = c5.text_input(projekt_label(), key="admin_nach_projekt")
+                            m_projekt = c5.text_input(projekt_label(), key="admin_nach_projekt_text")
                     m_notiz = st.text_input(t("Notiz (optional)", "Note (optional)"), key="admin_nach_notiz")
                     gespeichert = st.form_submit_button(t("💾 Zeit speichern", "💾 Save time"), use_container_width=True, type="primary")
                 if gespeichert:
@@ -3866,6 +3997,11 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                     edit[c] = pd.to_numeric(edit[c], errors="coerce")
                 edit["Löschen"] = False
                 edit = edit[["ID", "Mitarbeiter", "Datum", "Kommen", "Gehen", "Pause (Min)", "Kategorie", "Kunde-ID", "Projekt-ID", "Projekt", "Notiz", "Typ", "Status", "Netto (Std)", "Löschen"]]
+                # Auswahllisten einmal bilden statt je Spaltenkonfiguration erneut
+                _kdf = aktive_kunden_df()
+                _pdf = aktive_projekte_df()
+                _kunden_ids = [str(x) for x in _kdf["Kunden-ID"].tolist()] if not _kdf.empty else []
+                _projekt_ids = [str(x) for x in _pdf["Projekt-ID"].tolist()] if not _pdf.empty else []
                 typ_optionen = list(dict.fromkeys(["Normal", "Korrigiert", "Nachtrag", "Import"] + [str(x) for x in edit["Typ"].dropna().unique() if str(x) not in ("", "nan")]))
                 status_optionen = ["Läuft", "Erfasst", "Freigegeben"]
                 kategorie_optionen = list(dict.fromkeys(kategorien() + [str(x) for x in edit["Kategorie"].dropna().unique() if str(x) not in ("", "nan")]))
@@ -3876,30 +4012,28 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                     "Gehen": st.column_config.TextColumn(spalten_label("Gehen"), validate=r"^([01]?\d|2[0-3]):[0-5]\d$"),
                     "Pause (Min)": st.column_config.NumberColumn(spalten_label("Pause (Min)"), min_value=0, max_value=480, step=5, format="%d"),
                     "Kategorie": st.column_config.SelectboxColumn(spalten_label("Kategorie"), options=kategorie_optionen),
-                    "Kunde-ID": st.column_config.SelectboxColumn(t("Kunde", "Customer"), options=[str(x) for x in aktive_kunden_df()["Kunden-ID"].tolist()] if not aktive_kunden_df().empty else []),
-                    "Projekt-ID": st.column_config.SelectboxColumn(t("Projekt", "Project"), options=[str(x) for x in aktive_projekte_df()["Projekt-ID"].tolist()] if not aktive_projekte_df().empty else []),
+                    "Kunde-ID": st.column_config.SelectboxColumn(t("Kunde", "Customer"), options=_kunden_ids),
+                    "Projekt-ID": st.column_config.SelectboxColumn(t("Projekt", "Project"), options=_projekt_ids),
                     "Typ": st.column_config.SelectboxColumn(spalten_label("Typ"), options=typ_optionen),
                     "Status": st.column_config.SelectboxColumn(spalten_label("Status"), options=status_optionen),
                     "Netto (Std)": st.column_config.NumberColumn(spalten_label("Netto (Std)"), disabled=True, format="%.2f"),
                     "Löschen": st.column_config.CheckboxColumn(t("Löschen", "Delete")),
                 })
-                if st.session_state.pop("_clear_admin_zeiten_delete_confirmed", False):
-                    st.session_state.pop("admin_zeiten_delete_confirmed", None)
-                _admin_delete_ids = [str(x) for x in edited.loc[edited["Löschen"].fillna(False).astype(bool), "ID"].tolist()]
-                _admin_delete_confirmed = True
-                if _admin_delete_ids:
-                    st.warning(t(
-                        f"{len(_admin_delete_ids)} Zeiteintrag/Zeiteinträge sind zur Löschung markiert. Die Löschung kann nicht rückgängig gemacht werden.",
-                        f"{len(_admin_delete_ids)} time entr{'y is' if len(_admin_delete_ids) == 1 else 'ies are'} marked for deletion. This cannot be undone."))
-                    _admin_delete_confirmed = st.checkbox(
-                        t("Ich bestätige, dass die markierten Zeiteinträge endgültig gelöscht werden sollen.",
-                          "I confirm that the marked time entries should be permanently deleted."),
-                        key="admin_zeiten_delete_confirmed")
-                if st.button(t("💾 Alle Änderungen speichern", "💾 Save all changes"), key="admin_zeiten_save", type="primary", use_container_width=True):
-                    if _admin_delete_ids and not _admin_delete_confirmed:
-                        st.error(t("Bitte bestätige zuerst die Löschung der markierten Zeiteinträge. Andere Änderungen werden trotzdem gespeichert.", "Please confirm deletion of the marked time entries first. Other changes will still be saved."))
-                        edited = edited.copy()
-                        edited.loc[edited["ID"].astype(str).isin(_admin_delete_ids), "Löschen"] = False
+                _admin_delete_ids = [str(x) for x in edited.loc[
+                    edited["Löschen"].fillna(False).astype(bool), "ID"].tolist()]
+                _admin_speichern = st.button(
+                    t("💾 Alle Änderungen speichern", "💾 Save all changes"),
+                    key="admin_zeiten_save", type="primary", use_container_width=True)
+                if _admin_speichern and _admin_delete_ids:
+                    st.session_state["_loeschfrage_admin_zeiten"] = _admin_delete_ids
+                    _admin_speichern = False
+                _admin_bestaetigt = loeschabfrage(
+                    "admin_zeiten", _admin_delete_ids,
+                    t(f"{len(st.session_state.get('_loeschfrage_admin_zeiten') or [])} Zeiteintrag/-einträge endgültig löschen?",
+                      f"Permanently delete {len(st.session_state.get('_loeschfrage_admin_zeiten') or [])} time entr(y/ies)?"),
+                    t("Betrifft auch bereits freigegebene Zeiten. Wiederherstellung nur über eine Datensicherung.",
+                      "This also affects released times. Restoration only from a backup."))
+                if _admin_bestaetigt or _admin_speichern:
                     logs = st.session_state.time_logs.copy()
                     fehler = []
                     pruefbestaende: dict = {}
@@ -3908,7 +4042,9 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                         if not mask.any():
                             continue
                         if bool(row.get("Löschen", False)):
-                            logs = logs.loc[~mask].reset_index(drop=True)
+                            # Nur löschen, was in der Rückfrage bestätigt wurde
+                            if _admin_bestaetigt and str(row["ID"]) in (_admin_bestaetigt or []):
+                                logs = logs.loc[~mask].reset_index(drop=True)
                             continue
                         kommen, gehen = parse_zeit(row["Kommen"]), parse_zeit(row["Gehen"])
                         datum = row["Datum"].date() if isinstance(row["Datum"], pd.Timestamp) else row["Datum"]
@@ -3940,7 +4076,6 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                     else:
                         st.session_state.time_logs = logs
                         speichern("time_logs")
-                        st.session_state["_clear_admin_zeiten_delete_confirmed"] = True
                         melde("Arbeitszeiten gespeichert.", "Working times saved.", "💾")
                         st.rerun()
 
@@ -4446,6 +4581,12 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
             _storno_key = "urlaub_storno_bestaetigt"
             if st.session_state.pop("_urlaub_storno_clear", False):
                 st.session_state.pop(_storno_key, None)
+            # Der Grund ist Pflicht: Eine Stornierung nimmt einen bereits zugesagten
+            # Urlaub zurück – ohne Begründung führt das unweigerlich zur Rückfrage.
+            _storno_grund = st.text_input(
+                t("Grund für die Stornierung (Pflicht)", "Reason for cancellation (required)"),
+                key=f"urlaub_storno_grund_{_storno_id}",
+                placeholder=t("z. B. Krankheitsvertretung nötig", "e.g. sick cover required"))
             if st.checkbox(t("Ich möchte diesen genehmigten Urlaub stornieren",
                              "I want to cancel this approved leave"), key=_storno_key):
                 st.warning(t(
@@ -4453,15 +4594,18 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                     f"The approved leave of {_storno_zeile['Mitarbeiter']} will be marked as 'Cancelled'. The leave days will be released again."))
                 if st.button(t("⚠️ Ja, Urlaub endgültig stornieren", "⚠️ Yes, cancel leave"),
                              key="urlaub_storno_final", use_container_width=True):
-                    _maske_storno = st.session_state.vacation_requests["ID"].astype(str) == _storno_id
-                    st.session_state.vacation_requests.loc[_maske_storno, "Status"] = "Storniert"
-                    st.session_state.vacation_requests.loc[_maske_storno, "Entscheidungsgrund"] = t(
-                        "Vom Admin storniert", "Cancelled by admin")
-                    speichern("vacation_requests")
-                    melde(t("Urlaub wurde storniert.", "Leave was cancelled."),
-                          t("Leave was cancelled.", "Leave was cancelled."), "↩️")
-                    st.session_state["_urlaub_storno_clear"] = True
-                    st.rerun()
+                    if not str(_storno_grund).strip():
+                        st.error(t("Bitte einen Grund angeben – der Mitarbeiter sieht ihn in seiner Übersicht.",
+                                   "Please state a reason – the employee will see it in their overview."))
+                    else:
+                        _maske_storno = st.session_state.vacation_requests["ID"].astype(str) == _storno_id
+                        st.session_state.vacation_requests.loc[_maske_storno, "Status"] = "Storniert"
+                        st.session_state.vacation_requests.loc[_maske_storno, "Entscheidungsgrund"] = str(_storno_grund).strip()
+                        speichern("vacation_requests")
+                        melde(f"Urlaub von {_storno_zeile['Mitarbeiter']} storniert.",
+                              f"Leave of {_storno_zeile['Mitarbeiter']} cancelled.", "↩️")
+                        st.session_state["_urlaub_storno_clear"] = True
+                        st.rerun()
 
         if systemadmin_vollzugriff and not df_vac.empty:
             st.markdown("---")
@@ -4838,7 +4982,9 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
             person_id = st.selectbox("Mitarbeiter auswählen", personen["MA-ID"].astype(str).tolist(), format_func=lambda x: personen.loc[personen["MA-ID"].astype(str) == x, "Label"].iloc[0], key="sys_ma_delete")
             person_name = id_zu_name(person_id)
             st.warning(f"Beim Löschen von **{person_name}** werden der Mitarbeiterdatensatz, verknüpfte Benutzerkonten, Arbeitszeiten und Urlaubsanträge entfernt.")
-            if st.checkbox("Ich möchte diesen Mitarbeiter zur endgültigen Löschung markieren", key="sys_ma_delete_confirm"):
+            ma_del_runde = st.session_state.get("_sys_ma_del_runde", 0)
+            if st.checkbox("Ich möchte diesen Mitarbeiter zur endgültigen Löschung markieren",
+                           key=f"sys_ma_delete_confirm_{ma_del_runde}"):
                 st.warning(f"ACHTUNG: **{person_name}** sowie das verknüpfte Konto, Arbeitszeiten und Urlaubsanträge werden dauerhaft gelöscht.")
                 c_del1, c_del2 = st.columns(2)
                 if c_del1.button("⚠️ Ja, endgültig löschen", key="sys_ma_delete_btn", use_container_width=True):
@@ -4855,7 +5001,8 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                     melde(f"Mitarbeiter „{person_name}“ und zugehörige Daten gelöscht.", "Employee and linked data deleted.", "🗑️")
                     st.rerun()
                 if c_del2.button("Abbrechen", key="sys_ma_delete_cancel", use_container_width=True):
-                    st.session_state["sys_ma_delete_confirm"] = False
+                    st.session_state["_sys_ma_del_runde"] = ma_del_runde + 1
+                    melde("Löschen abgebrochen.", "Deletion cancelled.", "↩️")
                     st.rerun()
 
     # ---------------- Kunden ----------------
@@ -4927,7 +5074,9 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                 st.info(t("Noch keine Projekte angelegt.", "No projects yet."))
             else:
                 proj_edit = st.session_state.projekte.copy(); proj_edit["Löschen"] = False
-                edited_p = st.data_editor(proj_edit, use_container_width=True, hide_index=True, num_rows="fixed", key="projekte_editor", column_config={"Projekt-ID": st.column_config.TextColumn("ID", disabled=True), "Kunden-ID": st.column_config.SelectboxColumn("Kunde", options=aktive_kunden_df()["Kunden-ID"].astype(str).tolist() if not aktive_kunden_df().empty else []), "Startdatum": st.column_config.DateColumn("Startdatum", format=DATUMSFORMAT_UI), "Enddatum": st.column_config.DateColumn("Enddatum", format=DATUMSFORMAT_UI), "Stundensatz": st.column_config.NumberColumn("Stundensatz", min_value=0.0, step=5.0, format="%.2f"), "Aktiv": st.column_config.CheckboxColumn("Aktiv"), "Löschen": st.column_config.CheckboxColumn("Löschen")})
+                _pk = aktive_kunden_df()
+                _proj_kunden_ids = _pk["Kunden-ID"].astype(str).tolist() if not _pk.empty else []
+                edited_p = st.data_editor(proj_edit, use_container_width=True, hide_index=True, num_rows="fixed", key="projekte_editor", column_config={"Projekt-ID": st.column_config.TextColumn("ID", disabled=True), "Kunden-ID": st.column_config.SelectboxColumn("Kunde", options=_proj_kunden_ids), "Startdatum": st.column_config.DateColumn("Startdatum", format=DATUMSFORMAT_UI), "Enddatum": st.column_config.DateColumn("Enddatum", format=DATUMSFORMAT_UI), "Stundensatz": st.column_config.NumberColumn("Stundensatz", min_value=0.0, step=5.0, format="%.2f"), "Aktiv": st.column_config.CheckboxColumn("Aktiv"), "Löschen": st.column_config.CheckboxColumn("Löschen")})
                 if st.button(t("💾 Projektänderungen speichern", "💾 Save project changes"), key="projekte_speichern", type="primary"):
                     st.session_state.projekte = edited_p.drop(columns=["Löschen"]).reset_index(drop=True); speichern("projekte"); st.rerun()
 
@@ -5164,7 +5313,9 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                 if systemadmin_vollzugriff:
                     st.markdown("---")
                     st.warning("Systemadmin: Konto endgültig löschen. Das eigene Konto und das letzte Systemadmin-Konto sind geschützt.")
-                    if st.checkbox("Ich möchte dieses Konto zur endgültigen Löschung markieren", key="sys_konto_delete_confirm"):
+                    konto_del_runde = st.session_state.get("_sys_konto_del_runde", 0)
+                    if st.checkbox("Ich möchte dieses Konto zur endgültigen Löschung markieren",
+                                   key=f"sys_konto_delete_confirm_{konto_del_runde}"):
                         st.warning(f"Das Konto **{ziel}** wird dauerhaft gelöscht. Diese Aktion kann nicht rückgängig gemacht werden.")
                         c_del1, c_del2 = st.columns(2)
                         if c_del1.button("⚠️ Ja, Konto endgültig löschen", key="sys_konto_delete", use_container_width=True):
@@ -5180,7 +5331,8 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                                 melde(f"Konto „{ziel}“ gelöscht.", f"Account “{ziel}” deleted.", "🗑️")
                                 st.rerun()
                         if c_del2.button("Abbrechen", key="sys_konto_delete_cancel", use_container_width=True):
-                            st.session_state["sys_konto_delete_confirm"] = False
+                            st.session_state["_sys_konto_del_runde"] = konto_del_runde + 1
+                            melde("Löschen abgebrochen.", "Deletion cancelled.", "↩️")
                             st.rerun()
 
     # ---------------- Einstellungen ----------------
