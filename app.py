@@ -152,12 +152,12 @@ MAX_LOGIN_VERSUCHE = 5
 SPERRDAUER_MINUTEN = 5
 ROLLEN = ["Mitarbeiter", "Leitung / Admin", "Systemadministrator"]
 SPRACHEN = {"de": "Deutsch", "en": "English"}
-STANDARD_NACHTRAGSLIMIT = 24.0      # Stunden – "1 Tag rückwirkend"
+STANDARD_NACHTRAGSLIMIT = 1.0       # Tage – Standard: 1 Kalendertag rückwirkend
 # Leitung und Admin korrigieren Zeiten auch für zurückliegende Abrechnungen.
 # Deshalb bekommen sie als Vorgabe ein praktisch unbegrenztes Fenster, das sich
 # in den Stammdaten jederzeit auf einen konkreten Wert zurücksetzen lässt.
-NACHTRAG_UNBEGRENZT = 876000.0      # 100 Jahre
-NACHTRAG_UNBEGRENZT_AB = 87600.0    # ab hier gilt die Anzeige als "unbegrenzt"
+NACHTRAG_UNBEGRENZT = 36500.0       # 100 Jahre in Tagen
+NACHTRAG_UNBEGRENZT_AB = 3650.0     # ab hier gilt die Anzeige als "unbegrenzt"
 
 BUNDESLAENDER = logik.BUNDESLAENDER   # einzige Quelle: das Fachlogik-Modul
 
@@ -340,7 +340,7 @@ SPALTEN_LABELS_EN = {
     "Letzter Login": "Last login", "Person": "Person", "MA-ID": "Emp. ID",
     "Personalnummer": "Staff no.", "Wochenstunden": "Weekly hours",
     "Urlaub_Pro_Jahr": "Leave / year", "Resturlaub_Vorjahr": "Carry-over",
-    "Nachtrag_Std_Limit": "Edit window (h)", "Login": "Login", "Sprache": "Language",
+    "Nachtrag_Std_Limit": "Back-entry limit (days)", "Login": "Login", "Sprache": "Language",
     "Ist (Std)": "Actual (h)", "Soll (Std)": "Target (h)", "Saldo (Std)": "Balance (h)",
     "Einträge": "Entries", "Netto-Stunden": "Net hours", "Löschen": "Delete",
 }
@@ -859,6 +859,28 @@ def doppelte_nummern(df: pd.DataFrame, spalte: str) -> list[str]:
     werte = df[spalte].fillna("").astype(str).str.strip()
     werte = werte[werte != ""]
     return sorted(werte[werte.str.casefold().duplicated(keep=False)].unique().tolist())
+
+
+def naechste_automatische_nummer(df: pd.DataFrame, spalte: str, prefix: str, stellen: int = 4) -> str:
+    """Ermittelt die nächste freie Nummer eines konfigurierbaren Nummernkreises."""
+    prefix = str(prefix or "").strip()
+    stellen = max(1, min(int(stellen or 4), 10))
+    belegt = set()
+    if df is not None and not df.empty and spalte in df.columns:
+        belegt = {str(v).strip().casefold() for v in df[spalte].fillna("") if str(v).strip()}
+    hoechste = 0
+    if df is not None and not df.empty and spalte in df.columns:
+        for wert in df[spalte].fillna("").astype(str):
+            wert = wert.strip()
+            if prefix and not wert.casefold().startswith(prefix.casefold()):
+                continue
+            rest = wert[len(prefix):] if prefix else wert
+            if rest.isdigit():
+                hoechste = max(hoechste, int(rest))
+    kandidat = hoechste + 1
+    while f"{prefix}{kandidat:0{stellen}d}".casefold() in belegt:
+        kandidat += 1
+    return f"{prefix}{kandidat:0{stellen}d}"
 
 
 def indizes_anlegen() -> None:
@@ -1430,6 +1452,13 @@ STANDARD_CONFIG = {
     "farbe_hintergrund_1": "#EEF3F8",
     "farbe_hintergrund_2": "#E6EEF6",
     "farbe_hintergrund_3": "#EAF2EC",
+    "autonummer_kunden": True,
+    "autonummer_projekte": True,
+    "autonummer_mitarbeiter": True,
+    "prefix_kunden": "K-",
+    "prefix_projekte": "P-",
+    "prefix_mitarbeiter": "MA-",
+    "nummern_stellen": 4,
 }
 
 
@@ -1492,8 +1521,9 @@ def _stammdaten_nachziehen(df: pd.DataFrame) -> pd.DataFrame:
     fehlend = df["MA-ID"].isna() | (df["MA-ID"].astype(str).str.strip() == "")
     if fehlend.any():
         df.loc[fehlend, "MA-ID"] = [f"ma-{uuid.uuid4().hex[:6]}" for _ in range(int(fehlend.sum()))]
+    # 0 bzw. leer bedeutet bewusst: kein Nachtragslimit.
     df["Nachtrag_Std_Limit"] = pd.to_numeric(
-        df["Nachtrag_Std_Limit"], errors="coerce").fillna(STANDARD_NACHTRAGSLIMIT)
+        df["Nachtrag_Std_Limit"], errors="coerce").fillna(0.0)
     return df
 
 
@@ -1636,6 +1666,20 @@ def daten_aktualisieren() -> None:
 
     gespeichert = einstellungen_laden()
     st.session_state.config = {**STANDARD_CONFIG, **gespeichert}
+
+    # Einmalige Migration: ältere Versionen speicherten das Nachtragslimit in Stunden.
+    # Ab jetzt wird derselbe Datenbankwert in Kalendertagen geführt (24 Std. -> 1 Tag).
+    if not st.session_state.config.get("migration_nachtrag_stunden_zu_tage"):
+        stammdaten = st.session_state.mitarbeiter_stammdaten.copy()
+        if not stammdaten.empty and "Nachtrag_Std_Limit" in stammdaten.columns:
+            alt = pd.to_numeric(stammdaten["Nachtrag_Std_Limit"], errors="coerce")
+            # Nur positive Altwerte umrechnen; leer/0 bleibt unbegrenzt.
+            maske = alt.notna() & (alt > 0)
+            stammdaten.loc[maske, "Nachtrag_Std_Limit"] = alt.loc[maske] / 24.0
+            st.session_state.mitarbeiter_stammdaten = stammdaten
+            speichern("mitarbeiter_stammdaten")
+        st.session_state.config["migration_nachtrag_stunden_zu_tage"] = True
+        einstellungen_speichern({"migration_nachtrag_stunden_zu_tage": True})
 
     # Einmalige Angleichung: Personen mit Leitungs-/Adminkonto bekommen ein
     # unbegrenztes Nachtragsfenster. Das läuft bewusst nur EINMAL pro Datenbank –
@@ -2044,29 +2088,37 @@ def stammdaten_zeile(name: str):
     return None if treffer.empty else treffer.iloc[0]
 
 
-def nachtrag_unbegrenzt(stunden: float) -> bool:
-    return float(stunden or 0) >= NACHTRAG_UNBEGRENZT_AB
+def nachtrag_unbegrenzt(tage: float) -> bool:
+    # Leer/0 bedeutet unbegrenzt; sehr große Alt-/Adminwerte ebenfalls.
+    try:
+        wert = float(tage)
+    except (TypeError, ValueError):
+        return True
+    return wert <= 0 or wert >= NACHTRAG_UNBEGRENZT_AB
 
 
-def nachtragslimit_text(stunden: float) -> str:
-    """Zeigt sehr große Werte als Unendlich-Zeichen statt als unleserliche Zahl."""
-    if nachtrag_unbegrenzt(stunden):
+def nachtragslimit_text(tage: float) -> str:
+    """Zeigt das Nachtragsfenster kundenfreundlich in Tagen."""
+    if nachtrag_unbegrenzt(tage):
         return "∞"
-    return f"{stunden:.0f} " + t("Std.", "h")
+    return f"{tage:.0f} " + t("Tage", "days")
 
 
 def nachtragslimit_stunden(ma_id: str) -> float:
-    """Wie weit darf diese Person Zeiten rückwirkend ändern? Vorgabe: 24 Std."""
+    """Kompatibilitätsname: liefert das konfigurierte Nachtragslimit in TAGEN."""
     df = st.session_state.mitarbeiter_stammdaten
     treffer = df[df["MA-ID"].astype(str) == str(ma_id)]
     if treffer.empty:
         return STANDARD_NACHTRAGSLIMIT
     wert = pd.to_numeric(treffer.iloc[0]["Nachtrag_Std_Limit"], errors="coerce")
-    return float(wert) if pd.notna(wert) and wert > 0 else STANDARD_NACHTRAGSLIMIT
+    return 0.0 if pd.isna(wert) or float(wert) <= 0 else float(wert)
 
 
 def nachtrag_grenze(ma_id: str) -> datetime:
-    return logik.nachtrag_grenze(nachtragslimit_stunden(ma_id))
+    tage = nachtragslimit_stunden(ma_id)
+    if nachtrag_unbegrenzt(tage):
+        return datetime(1900, 1, 1)
+    return datetime.now() - timedelta(days=float(tage))
 
 
 def arbeitszeitkalender_von(name: str) -> pd.DataFrame:
@@ -3452,9 +3504,9 @@ if st.session_state.role == "Mitarbeiter":
                                      "Edit directly in the table. Hours are recalculated on save."))
                     else:
                         st.caption(t(
-                            f"Direkt in der Tabelle änderbar (bis {limit_stunden:.0f} Std. rückwirkend). "
+                            f"Direkt in der Tabelle änderbar (bis {limit_stunden:.0f} Tage rückwirkend). "
                             "Stunden werden beim Speichern neu berechnet.",
-                            f"Edit directly in the table (up to {limit_stunden:.0f} h back). "
+                            f"Edit directly in the table (up to {limit_stunden:.0f} days back). "
                             "Hours are recalculated on save."))
 
                     # Ohne Projektfeld (z. B. Kita) bleibt die Spalte leer – dann weglassen
@@ -5088,6 +5140,46 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                      "Names can be corrected at any time – the link to the user account uses the "
                      "employee ID. Recorded times and requests are updated accordingly."))
 
+        _ma_form_version = int(st.session_state.get("_ma_form_version", 0))
+        with st.expander(t("➕ Neuen Mitarbeiter anlegen", "➕ Add employee"), expanded=False):
+            m1, m2, m3 = st.columns(3)
+            ma_name = m1.text_input(t("Name", "Name"), key=f"neu_ma_name_{_ma_form_version}")
+            auto_ma_nr = naechste_automatische_nummer(
+                st.session_state.mitarbeiter_stammdaten, "Personalnummer",
+                cfg("prefix_mitarbeiter"), cfg("nummern_stellen")) if cfg("autonummer_mitarbeiter") else ""
+            ma_nr = m2.text_input(t("Mitarbeiternummer", "Employee no."), value=auto_ma_nr,
+                                  disabled=bool(cfg("autonummer_mitarbeiter")), key=f"neu_ma_nr_{_ma_form_version}")
+            ma_aktiv = m3.selectbox(t("Status", "Status"), [t("Aktiv", "Active"), t("Inaktiv", "Inactive")],
+                                    key=f"neu_ma_aktiv_{_ma_form_version}")
+            m1, m2, m3 = st.columns(3)
+            ma_urlaub = m1.number_input(t("Urlaubstage/Jahr", "Vacation days/year"), min_value=0, max_value=60, value=30, step=1, key=f"neu_ma_urlaub_{_ma_form_version}")
+            ma_rest = m2.number_input(t("Resturlaub Vorjahr", "Carry-over vacation"), min_value=0, max_value=60, value=0, step=1, key=f"neu_ma_rest_{_ma_form_version}")
+            ma_nachtrag = m3.number_input(t("Nachtragslimit (Tage)", "Back-entry limit (days)"), min_value=0.0, max_value=3650.0, value=None, step=1.0, placeholder=t("Leer = unbegrenzt", "Empty = unlimited"), help=t("Leer oder 0 = kein Limit. Beispiel: 7 = maximal 7 Kalendertage rückwirkend.", "Empty or 0 = unlimited. Example: 7 = up to 7 calendar days back."), key=f"neu_ma_nachtrag_{_ma_form_version}")
+            if st.button(t("💾 Mitarbeiter anlegen", "💾 Add employee"), type="primary", key=f"ma_anlegen_{_ma_form_version}"):
+                name = str(ma_name or "").strip()
+                nummer = str(ma_nr or "").strip() or naechste_automatische_nummer(
+                    st.session_state.mitarbeiter_stammdaten, "Personalnummer", cfg("prefix_mitarbeiter"), cfg("nummern_stellen"))
+                if not name:
+                    st.error(t("Bitte einen Namen eingeben.", "Please enter a name."))
+                elif st.session_state.mitarbeiter_stammdaten["Mitarbeiter"].fillna("").astype(str).str.strip().str.casefold().eq(name.casefold()).any():
+                    st.error(t("Dieser Mitarbeitername ist bereits vorhanden.", "This employee name already exists."))
+                elif not eindeutige_nummer_pruefen(st.session_state.mitarbeiter_stammdaten, "Personalnummer", nummer):
+                    st.error(t(f"Die Mitarbeiternummer „{nummer}“ ist bereits vergeben.", f"Employee number “{nummer}” is already in use."))
+                else:
+                    datensatz = {
+                        "MA-ID": f"ma-{uuid.uuid4().hex[:6]}", "Mitarbeiter": name, "Personalnummer": nummer,
+                        "Wochenstunden": 0.0, "Urlaub_Pro_Jahr": int(ma_urlaub), "Resturlaub_Vorjahr": int(ma_rest),
+                        "Nachtrag_Std_Limit": float(ma_nachtrag or 0), "Aktiv": ma_aktiv == t("Aktiv", "Active"),
+                    }
+                    st.session_state.mitarbeiter_stammdaten = zeile_anhaengen(st.session_state.mitarbeiter_stammdaten, datensatz)
+                    speichern("mitarbeiter_stammdaten")
+                    st.session_state["_ma_form_version"] = _ma_form_version + 1
+                    melde(f"Mitarbeiter „{name}“ angelegt.", "Employee created.", "👤")
+                    st.rerun()
+
+        unterbereich_titel("✏️", t("Bestehende Mitarbeitende bearbeiten", "Edit existing employees"),
+                           t("Vorhandene Stammdaten ändern oder Mitarbeitende deaktivieren.", "Change existing master data or deactivate employees."))
+
         personalnr_frei = st.toggle(
             t("🔓 Personalnummern bearbeiten", "🔓 Edit staff numbers"), value=False,
             help=t("Personalnummern sind nach der Anlage gesperrt und können nur bewusst von der "
@@ -5110,7 +5202,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
             t("— kein Konto —", "— no account —"))
 
         bearbeitet = st.data_editor(
-            stamm_anzeige, use_container_width=True, hide_index=True, num_rows="dynamic",
+            stamm_anzeige, use_container_width=True, hide_index=True, num_rows="fixed",
             column_config={
                 "MA-ID": st.column_config.TextColumn("ID", disabled=True) if interne_ids_sichtbar() else None,
                 "Mitarbeiter": st.column_config.TextColumn(spalten_label("Mitarbeiter"), required=True),
@@ -5126,11 +5218,9 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                 "Resturlaub_Vorjahr": st.column_config.NumberColumn(
                     spalten_label("Resturlaub_Vorjahr"), min_value=0, max_value=60),
                 "Nachtrag_Std_Limit": st.column_config.NumberColumn(
-                    spalten_label("Nachtrag_Std_Limit"), min_value=1.0, max_value=8760.0, step=1.0,
-                    help=t(f"Wie weit darf diese Person Zeiten rückwirkend ändern? "
-                           f"Vorgabe: {STANDARD_NACHTRAGSLIMIT:.0f} Std., für Leitung/Admin unbegrenzt.",
-                           f"How far back may this person edit times? "
-                           f"Default: {STANDARD_NACHTRAGSLIMIT:.0f} h.")),
+                    t("Nachtragslimit (Tage)", "Back-entry limit (days)"), min_value=0.0, max_value=3650.0, step=1.0,
+                    help=t("Leer oder 0 = kein Limit. Beispiel: 7 = maximal 7 Kalendertage rückwirkend.",
+                           "Empty or 0 = unlimited. Example: 7 = up to 7 calendar days back.")),
                 "Aktiv": st.column_config.CheckboxColumn(spalten_label("Aktiv")),
                 "Login": st.column_config.TextColumn(spalten_label("Login"), disabled=True),
             },
@@ -5150,7 +5240,11 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                 ["", "nan", "<NA>"])
             bereinigt.loc[fehlend, "MA-ID"] = [f"ma-{uuid.uuid4().hex[:6]}" for _ in range(int(fehlend.sum()))]
 
-            if bereinigt["Mitarbeiter"].duplicated().any():
+            doppelte_ma_nr = doppelte_nummern(bereinigt, "Personalnummer")
+            if doppelte_ma_nr:
+                st.error(t(f"Mitarbeiternummern dürfen nicht doppelt vergeben werden: {', '.join(doppelte_ma_nr)}",
+                           f"Employee numbers must be unique: {', '.join(doppelte_ma_nr)}"))
+            elif bereinigt["Mitarbeiter"].duplicated().any():
                 st.error(t("Es gibt doppelte Namen – bitte eindeutig benennen.",
                            "There are duplicate names – please make them unique."))
             else:
@@ -5166,7 +5260,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                     bereinigt[spalte] = pd.to_numeric(bereinigt[spalte], errors="coerce").fillna(0).astype(int)
                 bereinigt["Nachtrag_Std_Limit"] = pd.to_numeric(
                     bereinigt["Nachtrag_Std_Limit"], errors="coerce"
-                ).fillna(STANDARD_NACHTRAGSLIMIT).clip(lower=1.0)
+                ).fillna(0.0).clip(lower=0.0)
                 bereinigt["Aktiv"] = bereinigt["Aktiv"].fillna(True).astype(bool)
 
                 vorher = dict(zip(
@@ -5416,7 +5510,8 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
             _kunde_form_version = int(st.session_state.get("_kunde_form_version", 0))
             with st.expander(t("➕ Neuen Kunden anlegen", "➕ Add customer"), expanded=False):
                 c1,c2,c3 = st.columns(3)
-                knr = c1.text_input(t("Kundennummer", "Customer no."), key=f"neu_kundennr_{_kunde_form_version}")
+                auto_knr = naechste_automatische_nummer(st.session_state.kunden, "Kundennummer", cfg("prefix_kunden"), cfg("nummern_stellen")) if cfg("autonummer_kunden") else ""
+                knr = c1.text_input(t("Kundennummer", "Customer no."), value=auto_knr, disabled=bool(cfg("autonummer_kunden")), key=f"neu_kundennr_{_kunde_form_version}")
                 kn = c2.text_input(t("Kunde / Firma", "Customer / company"), key=f"neu_kunde_{_kunde_form_version}")
                 ap = c3.text_input(t("Ansprechpartner", "Contact person"), key=f"neu_kunden_ap_{_kunde_form_version}")
                 c1,c2,c3 = st.columns(3)
@@ -5427,7 +5522,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                 c_status = st.selectbox(t("Status", "Status"), [t("Aktiv", "Active"), t("Inaktiv", "Inactive")], key=f"neu_kunden_status_{_kunde_form_version}")
                 notiz = st.text_input(t("Notiz", "Note"), key=f"neu_kunden_notiz_{_kunde_form_version}")
                 if st.button(t("💾 Kunde anlegen", "💾 Add customer"), key="kunde_anlegen", type="primary"):
-                    nr = knr.strip() or f"K-{len(st.session_state.kunden)+1:04d}"
+                    nr = knr.strip() or naechste_automatische_nummer(st.session_state.kunden, "Kundennummer", cfg("prefix_kunden"), cfg("nummern_stellen"))
                     if not kn.strip(): st.error(t("Bitte einen Kundennamen eingeben.", "Please enter a customer name."))
                     elif not eindeutige_nummer_pruefen(st.session_state.kunden, "Kundennummer", nr):
                         st.error(t(f"Die Kundennummer „{nr}“ ist bereits vergeben. Bitte eine andere Kundennummer verwenden.",
@@ -5469,7 +5564,8 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
             _projekt_form_version = int(st.session_state.get("_projekt_form_version", 0))
             with st.expander(t("➕ Neues Projekt anlegen", "➕ Add project"), expanded=False):
                 c1,c2,c3 = st.columns(3)
-                pnr = c1.text_input(t("Projektnummer", "Project no."), key=f"neu_projektnr_{_projekt_form_version}")
+                auto_pnr = naechste_automatische_nummer(st.session_state.projekte, "Projektnummer", cfg("prefix_projekte"), cfg("nummern_stellen")) if cfg("autonummer_projekte") else ""
+                pnr = c1.text_input(t("Projektnummer", "Project no."), value=auto_pnr, disabled=bool(cfg("autonummer_projekte")), key=f"neu_projektnr_{_projekt_form_version}")
                 pname = c2.text_input(t("Projektname", "Project name"), key=f"neu_projektname_{_projekt_form_version}")
                 kdf = aktive_kunden_df(); kop = kdf["Kunden-ID"].astype(str).tolist() if not kdf.empty else []
                 pkunde = c3.selectbox(t("Kunde", "Customer"), ["__KEINER__"] + kop, format_func=lambda x: t("Kein Kunde", "No customer") if x == "__KEINER__" else kunden_label(x), key=f"neu_projektkunde_{_projekt_form_version}")
@@ -5481,7 +5577,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                 p_aktivstatus = st.selectbox(t("Aktivstatus", "Active status"), [t("Aktiv", "Active"), t("Inaktiv", "Inactive")], key=f"neu_projekt_aktivstatus_{_projekt_form_version}")
                 pnotiz = st.text_input(t("Notiz", "Note"), key=f"neu_projektnotiz_{_projekt_form_version}")
                 if st.button(t("💾 Projekt anlegen", "💾 Add project"), key="projekt_anlegen", type="primary"):
-                    nr = pnr.strip() or f"P-{len(st.session_state.projekte)+1:04d}"
+                    nr = pnr.strip() or naechste_automatische_nummer(st.session_state.projekte, "Projektnummer", cfg("prefix_projekte"), cfg("nummern_stellen"))
                     if not pname.strip(): st.error(t("Bitte einen Projektnamen eingeben.", "Please enter a project name."))
                     elif pkunde == "__KEINER__": st.error(t("Bitte einen Kunden auswählen.", "Please select a customer."))
                     elif ende is not None and ende < start: st.error(t("Das Enddatum darf nicht vor dem Startdatum liegen.", "End date cannot be before start date."))
@@ -5882,22 +5978,43 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                 st.rerun()
 
             if systemadmin_vollzugriff:
-                st.markdown(f"**{t('Kundenindividuelle Farben', 'Customer-specific colors')}**")
-                f1, f2 = st.columns(2)
-                farbe_primaer = f1.color_picker(t("Primärfarbe", "Primary color"), cfg("farbe_primaer"), key="farbe_primaer_widget")
-                farbe_primaer_hell = f2.color_picker(t("Akzentfarbe", "Accent color"), cfg("farbe_primaer_hell"), key="farbe_primaer_hell_widget")
-                f3, f4, f5 = st.columns(3)
-                farbe_bg1 = f3.color_picker(t("Hintergrund 1", "Background 1"), cfg("farbe_hintergrund_1"), key="farbe_bg1_widget")
-                farbe_bg2 = f4.color_picker(t("Hintergrund 2", "Background 2"), cfg("farbe_hintergrund_2"), key="farbe_bg2_widget")
-                farbe_bg3 = f5.color_picker(t("Hintergrund 3", "Background 3"), cfg("farbe_hintergrund_3"), key="farbe_bg3_widget")
-                if st.button(t("🎨 Farben speichern", "🎨 Save colors"), use_container_width=True, key="farben_speichern"):
-                    st.session_state.config.update({
-                        "farbe_primaer": farbe_primaer, "farbe_primaer_hell": farbe_primaer_hell,
-                        "farbe_hintergrund_1": farbe_bg1, "farbe_hintergrund_2": farbe_bg2, "farbe_hintergrund_3": farbe_bg3,
-                    })
-                    einstellungen_speichern(st.session_state.config)
-                    melde("Farben gespeichert.", "Colors saved.", "🎨")
-                    st.rerun()
+                with st.expander(t("🎨 Farben", "🎨 Colors"), expanded=False):
+                    f1, f2, f3, f4, f5 = st.columns(5)
+                    farbe_primaer = f1.color_picker(t("Primär", "Primary"), cfg("farbe_primaer"), key="farbe_primaer_widget")
+                    farbe_primaer_hell = f2.color_picker(t("Akzent", "Accent"), cfg("farbe_primaer_hell"), key="farbe_primaer_hell_widget")
+                    farbe_bg1 = f3.color_picker(t("Fläche 1", "Surface 1"), cfg("farbe_hintergrund_1"), key="farbe_bg1_widget")
+                    farbe_bg2 = f4.color_picker(t("Fläche 2", "Surface 2"), cfg("farbe_hintergrund_2"), key="farbe_bg2_widget")
+                    farbe_bg3 = f5.color_picker(t("Fläche 3", "Surface 3"), cfg("farbe_hintergrund_3"), key="farbe_bg3_widget")
+                    if st.button(t("Farben speichern", "Save colors"), key="farben_speichern"):
+                        st.session_state.config.update({
+                            "farbe_primaer": farbe_primaer, "farbe_primaer_hell": farbe_primaer_hell,
+                            "farbe_hintergrund_1": farbe_bg1, "farbe_hintergrund_2": farbe_bg2, "farbe_hintergrund_3": farbe_bg3,
+                        })
+                        einstellungen_speichern(st.session_state.config)
+                        melde("Farben gespeichert.", "Colors saved.", "🎨")
+                        st.rerun()
+
+                with st.expander(t("🔢 Automatische Nummerierung", "🔢 Automatic numbering"), expanded=False):
+                    n1, n2, n3 = st.columns(3)
+                    auto_k = n1.toggle(t("Kunden", "Customers"), value=bool(cfg("autonummer_kunden")), key="auto_nr_k")
+                    auto_p = n2.toggle(t("Projekte", "Projects"), value=bool(cfg("autonummer_projekte")), key="auto_nr_p")
+                    auto_m = n3.toggle(t("Mitarbeitende", "Employees"), value=bool(cfg("autonummer_mitarbeiter")), key="auto_nr_m")
+                    p1, p2, p3, p4 = st.columns(4)
+                    pre_k = p1.text_input(t("Präfix Kunde", "Customer prefix"), value=str(cfg("prefix_kunden")), key="prefix_k")
+                    pre_p = p2.text_input(t("Präfix Projekt", "Project prefix"), value=str(cfg("prefix_projekte")), key="prefix_p")
+                    pre_m = p3.text_input(t("Präfix Mitarbeiter", "Employee prefix"), value=str(cfg("prefix_mitarbeiter")), key="prefix_m")
+                    stellen = p4.number_input(t("Ziffern", "Digits"), min_value=2, max_value=8, value=int(cfg("nummern_stellen")), step=1, key="nr_stellen")
+                    st.caption(t("Beispiel: K-0001, P-0001 und MA-0001. Die nächste freie Nummer wird automatisch ermittelt.",
+                                 "Example: K-0001, P-0001 and MA-0001. The next available number is determined automatically."))
+                    if st.button(t("Nummernkreise speichern", "Save numbering"), key="nummernkreise_speichern"):
+                        st.session_state.config.update({
+                            "autonummer_kunden": bool(auto_k), "autonummer_projekte": bool(auto_p), "autonummer_mitarbeiter": bool(auto_m),
+                            "prefix_kunden": str(pre_k).strip(), "prefix_projekte": str(pre_p).strip(), "prefix_mitarbeiter": str(pre_m).strip(),
+                            "nummern_stellen": int(stellen),
+                        })
+                        einstellungen_speichern(st.session_state.config)
+                        melde("Automatische Nummerierung gespeichert.", "Automatic numbering saved.", "🔢")
+                        st.rerun()
 
         # Arbeitszeit- und Abwesenheitsarten werden branchenspezifisch ausgerollt.
         # Nur der Systemadmin bestimmt Branche/Firma; der Kunde darf die ausgerollten
