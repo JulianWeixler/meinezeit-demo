@@ -172,7 +172,7 @@ BRANCHEN = {
     },
     "Handwerk / Bau": {
         "label": ("Handwerk / Bau", "Trades / construction"),
-        "projekt_label": ("Baustelle / Auftrag", "Site / job"),
+        "projekt_label": ("Projekt", "Project"),
         "projekt_aktiv": True,
         "kategorien": [("Arbeitszeit", "Working time"), ("Fahrtzeit", "Travel time"),
                        ("Rüstzeit / Lager", "Setup / warehouse"), ("Bereitschaft", "On call"),
@@ -1757,6 +1757,16 @@ def projekt_label_id(projekt_id: str) -> str:
     return st.session_state.get("_projekt_beschriftung", {}).get(str(projekt_id), "—")
 
 
+def sicherer_text(wert, standard="") -> str:
+    """Konvertiert auch pd.NA/NaN sicher in Text, ohne bool(pd.NA) auszulösen."""
+    try:
+        if wert is None or pd.isna(wert):
+            return str(standard or "")
+    except (TypeError, ValueError):
+        pass
+    return str(wert)
+
+
 def zeit_mit_kunden_projekten(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
     if "Kunde-ID" not in out.columns: out["Kunde-ID"] = ""
@@ -2258,6 +2268,20 @@ STATUS_FARBEN = {
 UEBERSETZTE_WERTSPALTEN = ("Status", "Art", "Kategorie", "Typ", "Einheit", "Rolle")
 
 
+INTERNE_ID_SPALTEN = {"ID", "MA-ID", "KAL-ID", "Kunden-ID", "Projekt-ID"}
+
+def interne_ids_sichtbar() -> bool:
+    """Interne Schlüssel nur für den Systemadministrator im Supportmodus anzeigen."""
+    return bool(
+        st.session_state.get("role") == "Systemadministrator"
+        and st.session_state.get("systemadmin_adminmodus", False)
+        and st.session_state.get("support_ids_anzeigen", False)
+    )
+
+def ohne_interne_ids(df: pd.DataFrame) -> pd.DataFrame:
+    """Entfernt technische Schlüssel aus kundenorientierten Ansichten/Exporten."""
+    return df.drop(columns=[c for c in INTERNE_ID_SPALTEN if c in df.columns], errors="ignore")
+
 def anzeige_df(df: pd.DataFrame) -> pd.DataFrame:
     """Kopie mit Datumswerten und – bei englischer Oberfläche – übersetzten Inhalten."""
     aus = df.copy()
@@ -2301,8 +2325,9 @@ def spalten_config(df: pd.DataFrame) -> dict:
 
 
 def tabelle(df: pd.DataFrame, status_spalte="Status", **kwargs) -> None:
-    config = spalten_config(df)
-    anzeige = anzeige_df(df)
+    sichtbar = df.copy() if interne_ids_sichtbar() else ohne_interne_ids(df.copy())
+    config = spalten_config(sichtbar)
+    anzeige = anzeige_df(sichtbar)
     spalte = spalten_label(status_spalte) if status_spalte else None
     if spalte and spalte in anzeige.columns and not anzeige.empty:
         farben = {wert_label(k): v for k, v in STATUS_FARBEN.items()}
@@ -2321,7 +2346,7 @@ def tabelle(df: pd.DataFrame, status_spalte="Status", **kwargs) -> None:
 def konvertiere_zu_excel(df: pd.DataFrame) -> bytes:
     # Ohne Kunden-/Projektmodul würden zwei leere Spalten im Export landen
     aufbereitet = zeit_mit_kunden_projekten(df) if kunden_projekte_aktiv() else df
-    export = anzeige_df(aufbereitet)
+    export = anzeige_df(ohne_interne_ids(aufbereitet))
     for spalte in export.columns:
         if pd.api.types.is_datetime64_any_dtype(export[spalte]):
             export[spalte] = export[spalte].dt.strftime(DATUMSFORMAT)
@@ -2347,7 +2372,7 @@ def konvertiere_zu_excel(df: pd.DataFrame) -> bytes:
 
 
 def konvertiere_zu_csv(df: pd.DataFrame) -> bytes:
-    export = anzeige_df(df)
+    export = anzeige_df(ohne_interne_ids(df))
     for spalte in export.columns:
         if pd.api.types.is_datetime64_any_dtype(export[spalte]):
             export[spalte] = export[spalte].dt.strftime(DATUMSFORMAT)
@@ -3759,6 +3784,13 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
         if st.button("🛠️ Zur Systemadministrator-Ansicht", use_container_width=True):
             st.session_state.systemadmin_adminmodus = False
             st.rerun()
+        with st.expander(t("🛠️ Support-Werkzeuge", "🛠️ Support tools"), expanded=False):
+            st.toggle(
+                t("Interne IDs in Tabellen anzeigen", "Show internal IDs in tables"),
+                key="support_ids_anzeigen", value=False,
+                help=t("Nur für Support und Fehlersuche. Kunden benötigen diese technischen Kennungen nicht.",
+                       "For support and troubleshooting only. Customers do not need these technical identifiers."),
+            )
 
     # Ein Leitungs-/Admin-Konto ist gleichzeitig ein normales Mitarbeiterkonto.
     # Deshalb bekommt die Leitung einen eigenen Bereich für die persönliche
@@ -4058,29 +4090,47 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                 # Ohne Kunden-/Projektmodul (z. B. Kita) bleiben diese Spalten leer –
                 # dann gar nicht erst anzeigen.
                 _spalten_edit = ["ID", "Mitarbeiter", "Datum", "Kommen", "Gehen", "Pause (Min)", "Kategorie"]
+                # In der Bearbeitung niemals interne IDs anzeigen. Stattdessen werden
+                # Kunde und Projekt als verständliche Namen/Nummern angeboten.
+                _kdf = aktive_kunden_df()
+                _pdf = aktive_projekte_df()
+                _kunde_label_zu_id = {}
+                _projekt_label_zu_id = {}
                 if mit_kunden_projekten:
-                    _spalten_edit += ["Kunde-ID", "Projekt-ID"]
-                if B["projekt_aktiv"]:
+                    _kunden_labels = []
+                    for _kid in _kdf["Kunden-ID"].astype(str).tolist() if not _kdf.empty else []:
+                        _lbl = kunden_label(_kid)
+                        _kunden_labels.append(_lbl)
+                        _kunde_label_zu_id[_lbl] = _kid
+                    _projekt_labels = []
+                    _projekt_label_zu_name = {}
+                    for _pid in _pdf["Projekt-ID"].astype(str).tolist() if not _pdf.empty else []:
+                        _lbl = projekt_label_id(_pid)
+                        _projekt_labels.append(_lbl)
+                        _projekt_label_zu_id[_lbl] = _pid
+                        _treffer = _pdf[_pdf["Projekt-ID"].astype(str) == _pid]
+                        _projekt_label_zu_name[_lbl] = sicherer_text(_treffer.iloc[0]["Projekt"]) if not _treffer.empty else _lbl
+                    edit["Kunde"] = edit.get("Kunde-ID", pd.Series([""] * len(edit), index=edit.index)).apply(
+                        lambda x: kunden_label(sicherer_text(x)) if sicherer_text(x) else "")
+                    edit["Projekt"] = edit.get("Projekt-ID", pd.Series([""] * len(edit), index=edit.index)).apply(
+                        lambda x: projekt_label_id(sicherer_text(x)) if sicherer_text(x) else "")
+                    _spalten_edit += ["Kunde", "Projekt"]
+                elif B["projekt_aktiv"]:
                     _spalten_edit.append("Projekt")
                 _spalten_edit += ["Notiz", "Typ", "Status", "Netto (Std)", "Löschen"]
                 edit = edit[_spalten_edit]
-                # Auswahllisten einmal bilden statt je Spaltenkonfiguration erneut
-                _kdf = aktive_kunden_df()
-                _pdf = aktive_projekte_df()
-                _kunden_ids = [str(x) for x in _kdf["Kunden-ID"].tolist()] if not _kdf.empty else []
-                _projekt_ids = [str(x) for x in _pdf["Projekt-ID"].tolist()] if not _pdf.empty else []
                 typ_optionen = list(dict.fromkeys(["Normal", "Korrigiert", "Nachtrag", "Import"] + [str(x) for x in edit["Typ"].dropna().unique() if str(x) not in ("", "nan")]))
                 status_optionen = ["Läuft", "Erfasst", "Freigegeben"]
                 kategorie_optionen = list(dict.fromkeys(kategorien() + [str(x) for x in edit["Kategorie"].dropna().unique() if str(x) not in ("", "nan")]))
                 edited = st.data_editor(edit, use_container_width=True, hide_index=True, num_rows="fixed", key="admin_zeiten_editor", column_config={
-                    "ID": None,
+                    "ID": st.column_config.TextColumn("ID", disabled=True) if interne_ids_sichtbar() else None,
                     "Datum": st.column_config.DateColumn(spalten_label("Datum"), format=DATUMSFORMAT_UI),
                     "Kommen": st.column_config.TextColumn(spalten_label("Kommen"), validate=r"^([01]?\d|2[0-3]):[0-5]\d$"),
                     "Gehen": st.column_config.TextColumn(spalten_label("Gehen"), validate=r"^([01]?\d|2[0-3]):[0-5]\d$"),
                     "Pause (Min)": st.column_config.NumberColumn(spalten_label("Pause (Min)"), min_value=0, max_value=480, step=5, format="%d"),
                     "Kategorie": st.column_config.SelectboxColumn(spalten_label("Kategorie"), options=kategorie_optionen),
-                    "Kunde-ID": st.column_config.SelectboxColumn(t("Kunde", "Customer"), options=_kunden_ids),
-                    "Projekt-ID": st.column_config.SelectboxColumn(t("Projekt", "Project"), options=_projekt_ids),
+                    "Kunde": st.column_config.SelectboxColumn(t("Kunde", "Customer"), options=_kunden_labels if mit_kunden_projekten else []),
+                    "Projekt": st.column_config.SelectboxColumn(projekt_label(), options=_projekt_labels if mit_kunden_projekten else []),
                     "Typ": st.column_config.SelectboxColumn(spalten_label("Typ"), options=typ_optionen),
                     "Status": st.column_config.SelectboxColumn(spalten_label("Status"), options=status_optionen),
                     "Netto (Std)": st.column_config.NumberColumn(spalten_label("Netto (Std)"), disabled=True, format="%.2f"),
@@ -4135,11 +4185,11 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                         _alt_zeile = logs.loc[mask].iloc[0]
                         logs.loc[mask, ["Mitarbeiter", "Datum", "Kommen", "Gehen", "Brutto (Std)", "Pause (Min)", "Netto (Std)", "Kategorie", "Kunde-ID", "Projekt-ID", "Projekt", "Notiz", "Typ", "Status"]] = [
                             str(row["Mitarbeiter"]), datum, kommen.strftime(ZEITFORMAT), gehen.strftime(ZEITFORMAT), brutto, pause, netto,
-                            str(row.get("Kategorie", "")),
-                            str(row.get("Kunde-ID", _alt_zeile.get("Kunde-ID", "")) or ""),
-                            str(row.get("Projekt-ID", _alt_zeile.get("Projekt-ID", "")) or ""),
-                            str(row.get("Projekt", _alt_zeile.get("Projekt", "")) or ""),
-                            str(row.get("Notiz", "") or ""), str(row.get("Typ", "Korrigiert") or "Korrigiert"), str(row.get("Status", "Erfasst"))
+                            sicherer_text(row.get("Kategorie", "")),
+                            (_kunde_label_zu_id.get(sicherer_text(row.get("Kunde", "")), sicherer_text(_alt_zeile.get("Kunde-ID", ""))) if mit_kunden_projekten else sicherer_text(_alt_zeile.get("Kunde-ID", ""))),
+                            (_projekt_label_zu_id.get(sicherer_text(row.get("Projekt", "")), sicherer_text(_alt_zeile.get("Projekt-ID", ""))) if mit_kunden_projekten else sicherer_text(_alt_zeile.get("Projekt-ID", ""))),
+                            (sicherer_text(row.get("Projekt", "")) if not mit_kunden_projekten else _projekt_label_zu_name.get(sicherer_text(row.get("Projekt", "")), sicherer_text(_alt_zeile.get("Projekt", "")))),
+                            sicherer_text(row.get("Notiz", "")), sicherer_text(row.get("Typ", "Korrigiert"), "Korrigiert"), sicherer_text(row.get("Status", "Erfasst"), "Erfasst")
                         ]
                     if fehler:
                         # Bei Fehlern wird nichts gespeichert – sonst landet ein
@@ -4158,13 +4208,34 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
         else:
             heute = date.today()
             c1, c2, c3 = st.columns([2, 1, 1])
-            auswahl_ma = c1.multiselect(t("Mitarbeitende", "Employees"), aktive_mitarbeiter(), default=[])
+            auswahl_ma = c1.multiselect(
+                t("Mitarbeitende", "Employees"), aktive_mitarbeiter(), default=[],
+                placeholder=t("Mitarbeiter wählen", "Choose employees"), key="ad_mitarbeiter")
             von = c2.date_input(t("Von", "From"), heute.replace(day=1), format=DATUMSFORMAT_UI, key="ad_von")
             bis = c3.date_input(t("Bis", "To"), heute, format=DATUMSFORMAT_UI, key="ad_bis")
+
+            # Bei Branchen mit Kunden/Projekten können Anzeige UND Export gezielt
+            # gefiltert werden. Exportiert wird exakt derselbe gefilterte Datenbestand.
+            ad_kunde = "__ALLE__"
+            ad_projekt = "__ALLE__"
+            if mit_kunden_projekten:
+                f1, f2 = st.columns(2)
+                _ad_kdf = aktive_kunden_df()
+                _ad_kids = ["__ALLE__"] + (_ad_kdf["Kunden-ID"].astype(str).tolist() if not _ad_kdf.empty else [])
+                ad_kunde = f1.selectbox(t("Kunde", "Customer"), _ad_kids,
+                    format_func=lambda x: t("Alle Kunden", "All customers") if x == "__ALLE__" else kunden_label(x), key="ad_kunde")
+                _ad_pdf = aktive_projekte_df(None if ad_kunde == "__ALLE__" else ad_kunde)
+                _ad_pids = ["__ALLE__"] + (_ad_pdf["Projekt-ID"].astype(str).tolist() if not _ad_pdf.empty else [])
+                ad_projekt = f2.selectbox(projekt_label(), _ad_pids,
+                    format_func=lambda x: t("Alle", "All") + " " + projekt_label().lower() if x == "__ALLE__" else projekt_label_id(x), key="ad_projekt")
 
             gefiltert = zeiten_von(None, von, bis)
             if auswahl_ma:
                 gefiltert = gefiltert[gefiltert["Mitarbeiter"].isin(auswahl_ma)]
+            if mit_kunden_projekten and ad_kunde != "__ALLE__":
+                gefiltert = gefiltert[gefiltert["Kunde-ID"].astype(str) == ad_kunde]
+            if mit_kunden_projekten and ad_projekt != "__ALLE__":
+                gefiltert = gefiltert[gefiltert["Projekt-ID"].astype(str) == ad_projekt]
 
             if gefiltert.empty:
                 st.warning(t("Keine Einträge im gewählten Zeitraum.", "No entries in the selected period."))
@@ -4234,7 +4305,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
         # Bearbeitung über die Eintrags-ID ist ausschließlich ein Werkzeug des
         # Systemadministrators (Support). Leitung und Admin ändern Zeiten oben
         # direkt in der Tabelle.
-        if st.session_state.role == "Systemadministrator":
+        if st.session_state.role == "Systemadministrator" and interne_ids_sichtbar():
             st.markdown("---")
             st.markdown("##### 🛠️ Systemadmin: Einzelnen Eintrag über die ID bearbeiten")
             zeit_df = st.session_state.time_logs.copy()
@@ -4390,7 +4461,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                 aus_kunde = st.selectbox(t("Kunde", "Customer"), kunden_ids_a, format_func=lambda x: t("Alle Kunden", "All customers") if x == "__ALLE__" else kunden_label(x), key="aus_kunde")
                 proj_df_a = aktive_projekte_df(aus_kunde)
                 proj_ids_a = ["__ALLE__"] + (proj_df_a["Projekt-ID"].astype(str).tolist() if not proj_df_a.empty else [])
-                aus_projekt = st.selectbox(t("Projekt", "Project"), proj_ids_a, format_func=lambda x: t("Alle Projekte", "All projects") if x == "__ALLE__" else projekt_label_id(x), key="aus_projekt")
+                aus_projekt = st.selectbox(projekt_label(), proj_ids_a, format_func=lambda x: t("Alle Projekte", "All projects") if x == "__ALLE__" else projekt_label_id(x), key="aus_projekt")
                 ma_ids_a = ["__ALLE__"] + [str(x) for x in aktive_mitarbeiter()]
                 aus_ma = st.selectbox(t("Mitarbeiter", "Employee"), ma_ids_a, format_func=lambda x: t("Alle Mitarbeiter", "All employees") if x == "__ALLE__" else x, key="aus_ma")
                 df_a = zeiten_von(None, avon, abis).copy()
@@ -4883,7 +4954,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
         bearbeitet = st.data_editor(
             stamm_anzeige, use_container_width=True, hide_index=True, num_rows="dynamic",
             column_config={
-                "MA-ID": st.column_config.TextColumn(spalten_label("MA-ID"), disabled=True),
+                "MA-ID": st.column_config.TextColumn("ID", disabled=True) if interne_ids_sichtbar() else None,
                 "Mitarbeiter": st.column_config.TextColumn(spalten_label("Mitarbeiter"), required=True),
                 "Personalnummer": st.column_config.TextColumn(
                     spalten_label("Personalnummer"), disabled=not personalnr_frei,
@@ -5211,7 +5282,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                 st.info(t("Noch keine Kunden angelegt.", "No customers yet."))
             else:
                 kunden_edit = st.session_state.kunden.copy(); kunden_edit["Löschen"] = False
-                edited_k = st.data_editor(kunden_edit, use_container_width=True, hide_index=True, num_rows="fixed", key="kunden_editor", column_config={"Kunden-ID": st.column_config.TextColumn("ID", disabled=True), "Aktiv": st.column_config.CheckboxColumn("Aktiv"), "Löschen": st.column_config.CheckboxColumn("Löschen")})
+                edited_k = st.data_editor(kunden_edit, use_container_width=True, hide_index=True, num_rows="fixed", key="kunden_editor", column_config={"Kunden-ID": st.column_config.TextColumn("ID", disabled=True) if interne_ids_sichtbar() else None, "Aktiv": st.column_config.CheckboxColumn("Aktiv"), "Löschen": st.column_config.CheckboxColumn("Löschen")})
                 if st.button(t("💾 Kundenänderungen speichern", "💾 Save customer changes"), key="kunden_speichern", type="primary"):
                     doppelte_k = doppelte_nummern(edited_k, "Kundennummer")
                     if doppelte_k:
@@ -5266,14 +5337,31 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                 proj_edit = st.session_state.projekte.copy(); proj_edit["Löschen"] = False
                 _pk = aktive_kunden_df()
                 _proj_kunden_ids = _pk["Kunden-ID"].astype(str).tolist() if not _pk.empty else []
-                edited_p = st.data_editor(proj_edit, use_container_width=True, hide_index=True, num_rows="fixed", key="projekte_editor", column_config={"Projekt-ID": st.column_config.TextColumn("ID", disabled=True), "Kunden-ID": st.column_config.SelectboxColumn("Kunde", options=_proj_kunden_ids), "Startdatum": st.column_config.DateColumn("Startdatum", format=DATUMSFORMAT_UI), "Enddatum": st.column_config.DateColumn("Enddatum", format=DATUMSFORMAT_UI), "Stundensatz": st.column_config.NumberColumn("Stundensatz", min_value=0.0, step=5.0, format="%.2f"), "Aktiv": st.column_config.CheckboxColumn("Aktiv"), "Löschen": st.column_config.CheckboxColumn("Löschen")})
+                _kunden_label_zu_id_projekt = {kunden_label(_kid): _kid for _kid in _proj_kunden_ids}
+                proj_edit["Kunde"] = proj_edit["Kunden-ID"].apply(
+                    lambda _kid: kunden_label(sicherer_text(_kid)) if sicherer_text(_kid) else "")
+                _proj_spalten = [c for c in ["Projekt-ID", "Projektnummer", "Projekt", "Kunden-ID", "Kunde", "Status", "Startdatum", "Enddatum", "Stundensatz", "Aktiv", "Notiz", "Löschen"] if c in proj_edit.columns]
+                proj_edit = proj_edit[_proj_spalten]
+                edited_p = st.data_editor(
+                    proj_edit, use_container_width=True, hide_index=True, num_rows="fixed", key="projekte_editor",
+                    column_config={
+                        "Projekt-ID": st.column_config.TextColumn("ID", disabled=True) if interne_ids_sichtbar() else None,
+                        "Kunden-ID": None,
+                        "Kunde": st.column_config.SelectboxColumn(t("Kunde", "Customer"), options=list(_kunden_label_zu_id_projekt.keys())),
+                        "Startdatum": st.column_config.DateColumn(t("Startdatum", "Start date"), format=DATUMSFORMAT_UI),
+                        "Enddatum": st.column_config.DateColumn(t("Enddatum", "End date"), format=DATUMSFORMAT_UI),
+                        "Stundensatz": st.column_config.NumberColumn(t("Stundensatz", "Hourly rate"), min_value=0.0, step=5.0, format="%.2f"),
+                        "Aktiv": st.column_config.CheckboxColumn(t("Aktiv", "Active")),
+                        "Löschen": st.column_config.CheckboxColumn(t("Löschen", "Delete")),
+                    })
+                edited_p["Kunden-ID"] = edited_p["Kunde"].map(_kunden_label_zu_id_projekt).fillna(edited_p["Kunden-ID"])
                 if st.button(t("💾 Projektänderungen speichern", "💾 Save project changes"), key="projekte_speichern", type="primary"):
                     doppelte_p = doppelte_nummern(edited_p, "Projektnummer")
                     if doppelte_p:
                         st.error(t(f"Projektnummern dürfen nicht doppelt vergeben werden: {', '.join(doppelte_p)}",
                                    f"Project numbers must be unique: {', '.join(doppelte_p)}"))
                     else:
-                        st.session_state.projekte = edited_p.drop(columns=["Löschen"]).reset_index(drop=True); speichern("projekte"); st.rerun()
+                        st.session_state.projekte = edited_p.drop(columns=["Löschen", "Kunde"], errors="ignore").reset_index(drop=True); speichern("projekte"); st.rerun()
 
     # ---------------- Benutzerkonten ----------------
     with tab_konten:
