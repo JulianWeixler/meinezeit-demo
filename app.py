@@ -10,6 +10,7 @@ Abhängigkeiten: streamlit, pandas, openpyxl
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import io
@@ -46,7 +47,7 @@ from logik import Abwesenheit, Buchung, Regeln, ZeitFehler
 # Versionsangabe: erscheint in der Fußzeile und im Diagnosebericht. Bei jeder
 # Auslieferung an einen Kunden hochzählen – ohne sie beginnt jeder Support-Fall
 # mit der Frage, welcher Stand überhaupt installiert ist.
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.3.0"
 APP_VERSIONSDATUM = "2026-09-20"
 SUPPORT_KONTAKT = os.getenv("SUPPORT_KONTAKT", "support@example.de")
 SUPPORT_ZEITEN = os.getenv("SUPPORT_ZEITEN", "Mo–Fr 18:00–20:00 Uhr")
@@ -1422,6 +1423,13 @@ STANDARD_CONFIG = {
     "passwort_mindestlaenge": 10,
     "max_login_versuche": 5,
     "sperrdauer_minuten": 5,
+    "logo_base64": "",
+    "logo_mime": "image/png",
+    "farbe_primaer": "#1E7A46",
+    "farbe_primaer_hell": "#2E9D5B",
+    "farbe_hintergrund_1": "#EEF3F8",
+    "farbe_hintergrund_2": "#E6EEF6",
+    "farbe_hintergrund_3": "#EAF2EC",
 }
 
 
@@ -1755,6 +1763,18 @@ def kunden_label(kunden_id: str) -> str:
 
 def projekt_label_id(projekt_id: str) -> str:
     return st.session_state.get("_projekt_beschriftung", {}).get(str(projekt_id), "—")
+
+
+def projekt_name_id(projekt_id: str) -> str:
+    """Reiner Projektname für Speicherung/Export; technische ID bleibt intern."""
+    pid = sicherer_text(projekt_id)
+    if not pid:
+        return ""
+    df = st.session_state.get("projekte", pd.DataFrame(columns=SPALTEN_PROJEKTE))
+    if df is None or df.empty:
+        return ""
+    treffer = df[df["Projekt-ID"].astype(str) == pid]
+    return sicherer_text(treffer.iloc[0].get("Projekt", "")) if not treffer.empty else ""
 
 
 def sicherer_text(wert, standard="") -> str:
@@ -2482,8 +2502,8 @@ st.markdown(
         --glas-heller: rgba(255, 255, 255, 0.78);
         --glas-rand: rgba(255, 255, 255, 0.85);
         --glas-schatten: 0 8px 32px rgba(31, 46, 74, 0.10);
-        --primary: #1E7A46;
-        --primary-hell: #2E9D5B;
+        --primary: __PRIMARY__;
+        --primary-hell: __PRIMARY_LIGHT__;
         --gefahr: #C6362F;
         --text: #16253B;
         --text-mild: #5A6B84;
@@ -2495,7 +2515,7 @@ st.markdown(
         background:
             radial-gradient(120vh 80vh at 8% -10%, rgba(120, 200, 160, 0.40), transparent 60%),
             radial-gradient(100vh 70vh at 105% 10%, rgba(140, 180, 240, 0.38), transparent 60%),
-            linear-gradient(160deg, #EEF3F8 0%, #E6EEF6 45%, #EAF2EC 100%);
+            linear-gradient(160deg, __BG1__ 0%, __BG2__ 45%, __BG3__ 100%);
         background-attachment: fixed;
     }
     * { font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
@@ -2693,7 +2713,11 @@ st.markdown(
         .stApp h2 { font-size: 1.15rem; }
     }
     </style>
-    """,
+    """.replace("__PRIMARY__", str(cfg("farbe_primaer")))
+       .replace("__PRIMARY_LIGHT__", str(cfg("farbe_primaer_hell")))
+       .replace("__BG1__", str(cfg("farbe_hintergrund_1")))
+       .replace("__BG2__", str(cfg("farbe_hintergrund_2")))
+       .replace("__BG3__", str(cfg("farbe_hintergrund_3"))),
     unsafe_allow_html=True,
 )
 
@@ -2717,9 +2741,15 @@ if not st.session_state.logged_in:
                 st.session_state.sprache = gewaehlt
                 st.rerun()
 
+        _login_logo = sicherer_text(cfg("logo_base64"))
+        if _login_logo:
+            try:
+                st.image(base64.b64decode(_login_logo), width=180)
+            except Exception:
+                pass
         st.markdown(
-            "<div style='text-align:center;font-size:2.6em;'>⏱️</div>"
-            f"<h2 style='text-align:center;color:#1B2430;margin:4px 0 0 0;'>{cfg('firmenname')}</h2>"
+            ("" if _login_logo else "<div style='text-align:center;font-size:2.6em;'>⏱️</div>")
+            + f"<h2 style='text-align:center;color:#1B2430;margin:4px 0 0 0;'>{cfg('firmenname')}</h2>"
             f"<p style='text-align:center;color:#64748B;margin-top:2px;'>"
             f"{t('Zeiterfassung &amp; Urlaubsverwaltung', 'Time tracking &amp; absence management')}</p>",
             unsafe_allow_html=True,
@@ -2842,6 +2872,12 @@ jetzt = datetime.now()
 kopf_links, kopf_rechts = st.columns([4, 1])
 with kopf_links:
     voller_name = str(st.session_state.user).strip() or str(st.session_state.username)
+    _kopf_logo = sicherer_text(cfg("logo_base64"))
+    if _kopf_logo:
+        try:
+            st.image(base64.b64decode(_kopf_logo), width=150)
+        except Exception:
+            pass
     st.markdown(
         f"<h2 class='kopf-gruss' style='margin-bottom:0;'>{gruss(jetzt)}, {voller_name} 👋</h2>"
         f"<p class='kopf-zeile' style='color:#64748B;'>"
@@ -3268,7 +3304,7 @@ if st.session_state.role == "Mitarbeiter":
                                                 index=vorauswahl_index(popt, letztes_projekt_m),
                                                 format_func=lambda x: t("— ohne Projekt —", "— no project —") if x == "__KEINER__" else projekt_label_id(x), key="ma_projekt_id")
                     if m_projekt_id == "__KEINER__": m_projekt_id = ""
-                    m_projekt_name = projekt_label_id(m_projekt_id) if m_projekt_id else ""
+                    m_projekt_name = projekt_name_id(m_projekt_id) if m_projekt_id else ""
                 else:
                     m_projekt_name = st.text_input(projekt_label(), key="ma_projekt")
             m_notiz = st.text_input(t("Notiz", "Note"), key="ma_notiz")
@@ -3812,15 +3848,13 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
     # fehlende Berechtigungen – besser gar nicht erst anzeigen.
     mit_kunden_projekten = kunden_projekte_aktiv()
     reiter_plan = [("meine_zeit", t("🕒 Meine Arbeitszeit", "🕒 My working time")),
-                   ("zeiten", t("📊 Zeiten & Export", "📊 Times & export"))]
-    if mit_kunden_projekten:
-        reiter_plan.append(("auswertung", t("📈 Auswertung", "📈 Analysis")))
-    reiter_plan += [("antraege", t("🌴 Anträge", "🌴 Requests")),
-                    ("stamm", t("👥 Stammdaten", "👥 Employees"))]
+                   ("zeiten", t("📊 Zeiten", "📊 Times")),
+                   ("antraege", t("🌴 Anträge", "🌴 Requests"))]
     if mit_kunden_projekten:
         reiter_plan += [("kunden", t("👤 Kunden", "👤 Customers")),
                         ("projekte", t("📁 Projekte", "📁 Projects"))]
-    reiter_plan += [("konten", t("🔐 Benutzerkonten", "🔐 User accounts")),
+    reiter_plan += [("stamm", t("👥 Stammdaten", "👥 Employees")),
+                    ("konten", t("🔐 Benutzerkonten", "🔐 User accounts")),
                     ("einst", t("⚙️ Einstellungen", "⚙️ Settings")),
                     ("hilfe", t("❓ Hilfe", "❓ Help"))]
 
@@ -3833,7 +3867,8 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
     tab_konten = reiter["konten"]
     tab_einst = reiter["einst"]
     tab_hilfe = reiter["hilfe"]
-    tab_auswertung = reiter.get("auswertung")
+    # Die Auswertung bleibt funktional, erscheint aber innerhalb des Reiters „Zeiten“.
+    tab_auswertung = tab_zeiten
     tab_kunden_verwaltung = reiter.get("kunden")
     tab_projekte = reiter.get("projekte")
 
@@ -3900,7 +3935,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                         projekt_widget_normalisieren("admin_eigenes_projekt", popt)
                         admin_projekt_id = s2.selectbox(t("Projekt (optional)", "Project (optional)"), popt, format_func=lambda x: t("— ohne Projekt —", "— no project —") if x == "__KEINER__" else projekt_label_id(x), disabled=not offen.empty, key="admin_eigenes_projekt")
                         if admin_projekt_id == "__KEINER__": admin_projekt_id = ""
-                        projekt = projekt_label_id(admin_projekt_id) if admin_projekt_id else ""
+                        projekt = projekt_name_id(admin_projekt_id) if admin_projekt_id else ""
                     else:
                         projekt = s2.text_input(projekt_label(), disabled=not offen.empty, key="admin_eigenes_projekt_text")
                 b1, b2 = st.columns(2)
@@ -3940,32 +3975,34 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
 
             st.markdown(f"#### {t('Zeit nachtragen', 'Add time')}")
             with st.container(border=True):
-                with st.form("admin_nachtrag"):
-                    # Leitung / Admin unterliegt beim Nachtragen keinem persönlichen Nachtragslimit.
-                    m_datum = st.date_input(t("Datum", "Date"), heute,
-                                            max_value=heute,
-                                            format=DATUMSFORMAT_UI, key="admin_nach_datum")
-                    c1, c2, c3 = st.columns(3)
-                    m_kommen = c1.time_input(t("Kommen", "Start"), time(8, 0), step=300, key="admin_nach_kommen")
-                    m_gehen = c2.time_input(t("Gehen", "End"), time(16, 30), step=300, key="admin_nach_gehen")
-                    m_pause = c3.number_input(t("Pause (Min.)", "Break (min)"), 0, 480, 0, 5, key="admin_nach_pause")
-                    c4, c5 = st.columns(2)
-                    m_kategorie = c4.selectbox(t("Kategorie", "Category"), kategorien(), format_func=wert_label, key="admin_nach_kat")
-                    admin_nach_kunde_id, admin_nach_projekt_id, m_projekt = "", "", ""
-                    if B["projekt_aktiv"]:
-                        if kunden_projekte_aktiv():
-                            kdf = aktive_kunden_df(); kopt = ["__KEINER__"] + (kdf["Kunden-ID"].astype(str).tolist() if not kdf.empty else [])
-                            admin_nach_kunde_id = c5.selectbox(t("Kunde", "Customer"), kopt, format_func=lambda x: t("Kein Kunde", "No customer") if x == "__KEINER__" else kunden_label(x), key="admin_nach_kunde")
-                            if admin_nach_kunde_id == "__KEINER__": admin_nach_kunde_id = ""
-                            popt = projekt_optionen_fuer_kunde(admin_nach_kunde_id)
-                            projekt_widget_normalisieren("admin_nach_projekt", popt)
-                            admin_nach_projekt_id = st.selectbox(t("Projekt (optional)", "Project (optional)"), popt, format_func=lambda x: t("— ohne Projekt —", "— no project —") if x == "__KEINER__" else projekt_label_id(x), key="admin_nach_projekt")
-                            if admin_nach_projekt_id == "__KEINER__": admin_nach_projekt_id = ""
-                            m_projekt = projekt_label_id(admin_nach_projekt_id) if admin_nach_projekt_id else ""
-                        else:
-                            m_projekt = c5.text_input(projekt_label(), key="admin_nach_projekt_text")
-                    m_notiz = st.text_input(t("Notiz (optional)", "Note (optional)"), key="admin_nach_notiz")
-                    gespeichert = st.form_submit_button(t("💾 Zeit speichern", "💾 Save time"), use_container_width=True, type="primary")
+                # Kein st.form: Kunde und Projekt sind voneinander abhängig. Streamlit
+                # muss nach der Kundenauswahl sofort neu rendern, damit ausschließlich
+                # die Projekte dieses Kunden angeboten werden.
+                # Leitung / Admin unterliegt beim Nachtragen keinem persönlichen Nachtragslimit.
+                m_datum = st.date_input(t("Datum", "Date"), heute,
+                                        max_value=heute,
+                                        format=DATUMSFORMAT_UI, key="admin_nach_datum")
+                c1, c2, c3 = st.columns(3)
+                m_kommen = c1.time_input(t("Kommen", "Start"), time(8, 0), step=300, key="admin_nach_kommen")
+                m_gehen = c2.time_input(t("Gehen", "End"), time(16, 30), step=300, key="admin_nach_gehen")
+                m_pause = c3.number_input(t("Pause (Min.)", "Break (min)"), 0, 480, 0, 5, key="admin_nach_pause")
+                c4, c5 = st.columns(2)
+                m_kategorie = c4.selectbox(t("Kategorie", "Category"), kategorien(), format_func=wert_label, key="admin_nach_kat")
+                admin_nach_kunde_id, admin_nach_projekt_id, m_projekt = "", "", ""
+                if B["projekt_aktiv"]:
+                    if kunden_projekte_aktiv():
+                        kdf = aktive_kunden_df(); kopt = ["__KEINER__"] + (kdf["Kunden-ID"].astype(str).tolist() if not kdf.empty else [])
+                        admin_nach_kunde_id = c5.selectbox(t("Kunde", "Customer"), kopt, format_func=lambda x: t("Kein Kunde", "No customer") if x == "__KEINER__" else kunden_label(x), key="admin_nach_kunde")
+                        if admin_nach_kunde_id == "__KEINER__": admin_nach_kunde_id = ""
+                        popt = projekt_optionen_fuer_kunde(admin_nach_kunde_id)
+                        projekt_widget_normalisieren("admin_nach_projekt", popt)
+                        admin_nach_projekt_id = st.selectbox(t("Projekt (optional)", "Project (optional)"), popt, format_func=lambda x: t("— ohne Projekt —", "— no project —") if x == "__KEINER__" else projekt_label_id(x), key="admin_nach_projekt")
+                        if admin_nach_projekt_id == "__KEINER__": admin_nach_projekt_id = ""
+                        m_projekt = projekt_name_id(admin_nach_projekt_id) if admin_nach_projekt_id else ""
+                    else:
+                        m_projekt = c5.text_input(projekt_label(), key="admin_nach_projekt_text")
+                m_notiz = st.text_input(t("Notiz (optional)", "Note (optional)"), key="admin_nach_notiz")
+                gespeichert = st.button(t("💾 Zeit speichern", "💾 Save time"), use_container_width=True, type="primary", key="admin_nach_speichern")
                 if gespeichert:
                     kommen_zeitpunkt = datetime.combine(m_datum, m_kommen)
                     # Leitung / Admin darf immer korrigieren bzw. nachtragen; nur Zukunft ist verboten.
@@ -5686,6 +5723,53 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                        "Company name and industry are set exclusively by the system administrator."))
             firmenname = cfg("firmenname")
             gewaehlte_branche = cfg("branche")
+
+        st.markdown(f"##### {t('Erscheinungsbild', 'Appearance')}")
+        with st.container(border=True):
+            st.caption(t(
+                "Ein Firmenlogo kann von Leitung/Admin oder Systemadmin hinterlegt werden. Farben werden ausschließlich vom Systemadmin festgelegt.",
+                "A company logo can be managed by management/admin or the system administrator. Colors are set only by the system administrator."))
+            logo_b64 = sicherer_text(cfg("logo_base64"))
+            if logo_b64:
+                try:
+                    st.image(base64.b64decode(logo_b64), width=180)
+                except Exception:
+                    st.warning(t("Das gespeicherte Logo konnte nicht angezeigt werden.", "The saved logo could not be displayed."))
+            logo_datei = st.file_uploader(t("Firmenlogo (PNG/JPG)", "Company logo (PNG/JPG)"), type=["png", "jpg", "jpeg"], key="firmenlogo_upload")
+            l1, l2 = st.columns(2)
+            if l1.button(t("Logo speichern", "Save logo"), use_container_width=True, disabled=logo_datei is None, key="logo_speichern"):
+                daten = logo_datei.getvalue() if logo_datei is not None else b""
+                if len(daten) > 2 * 1024 * 1024:
+                    st.error(t("Das Logo darf maximal 2 MB groß sein.", "The logo may not exceed 2 MB."))
+                else:
+                    st.session_state.config["logo_base64"] = base64.b64encode(daten).decode("ascii")
+                    st.session_state.config["logo_mime"] = logo_datei.type or "image/png"
+                    einstellungen_speichern(st.session_state.config)
+                    melde("Firmenlogo gespeichert.", "Company logo saved.", "🖼️")
+                    st.rerun()
+            if l2.button(t("Logo entfernen", "Remove logo"), use_container_width=True, disabled=not bool(logo_b64), key="logo_entfernen"):
+                st.session_state.config["logo_base64"] = ""
+                einstellungen_speichern(st.session_state.config)
+                melde("Firmenlogo entfernt.", "Company logo removed.", "🗑️")
+                st.rerun()
+
+            if systemadmin_vollzugriff:
+                st.markdown(f"**{t('Kundenindividuelle Farben', 'Customer-specific colors')}**")
+                f1, f2 = st.columns(2)
+                farbe_primaer = f1.color_picker(t("Primärfarbe", "Primary color"), cfg("farbe_primaer"), key="farbe_primaer_widget")
+                farbe_primaer_hell = f2.color_picker(t("Akzentfarbe", "Accent color"), cfg("farbe_primaer_hell"), key="farbe_primaer_hell_widget")
+                f3, f4, f5 = st.columns(3)
+                farbe_bg1 = f3.color_picker(t("Hintergrund 1", "Background 1"), cfg("farbe_hintergrund_1"), key="farbe_bg1_widget")
+                farbe_bg2 = f4.color_picker(t("Hintergrund 2", "Background 2"), cfg("farbe_hintergrund_2"), key="farbe_bg2_widget")
+                farbe_bg3 = f5.color_picker(t("Hintergrund 3", "Background 3"), cfg("farbe_hintergrund_3"), key="farbe_bg3_widget")
+                if st.button(t("🎨 Farben speichern", "🎨 Save colors"), use_container_width=True, key="farben_speichern"):
+                    st.session_state.config.update({
+                        "farbe_primaer": farbe_primaer, "farbe_primaer_hell": farbe_primaer_hell,
+                        "farbe_hintergrund_1": farbe_bg1, "farbe_hintergrund_2": farbe_bg2, "farbe_hintergrund_3": farbe_bg3,
+                    })
+                    einstellungen_speichern(st.session_state.config)
+                    melde("Farben gespeichert.", "Colors saved.", "🎨")
+                    st.rerun()
 
         # Arbeitszeit- und Abwesenheitsarten werden branchenspezifisch ausgerollt.
         # Nur der Systemadmin bestimmt Branche/Firma; der Kunde darf die ausgerollten
