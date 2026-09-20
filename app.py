@@ -46,8 +46,8 @@ from logik import Abwesenheit, Buchung, Regeln, ZeitFehler
 # Versionsangabe: erscheint in der Fußzeile und im Diagnosebericht. Bei jeder
 # Auslieferung an einen Kunden hochzählen – ohne sie beginnt jeder Support-Fall
 # mit der Frage, welcher Stand überhaupt installiert ist.
-APP_VERSION = "1.1.0"
-APP_VERSIONSDATUM = "2026-09-19"
+APP_VERSION = "1.2.0"
+APP_VERSIONSDATUM = "2026-09-20"
 SUPPORT_KONTAKT = os.getenv("SUPPORT_KONTAKT", "support@example.de")
 SUPPORT_ZEITEN = os.getenv("SUPPORT_ZEITEN", "Mo–Fr 18:00–20:00 Uhr")
 
@@ -179,6 +179,15 @@ BRANCHEN = {
                        ("Schulung", "Training")],
         "wochenstunden": 40.0,
     },
+    "Dienstleistung / Beratung": {
+        "label": ("Dienstleistung / Beratung", "Services / consulting"),
+        "projekt_label": ("Projekt / Auftrag", "Project / assignment"),
+        "projekt_aktiv": True,
+        "kategorien": [("Arbeitszeit", "Working time"), ("Kundentermin", "Customer appointment"),
+                       ("Projektarbeit", "Project work"), ("Reisezeit", "Travel time"),
+                       ("Vorbereitung", "Preparation")],
+        "wochenstunden": 40.0,
+    },
     "Kita / Soziales": {
         "label": ("Kita / Soziales", "Childcare / social work"),
         "projekt_label": ("Gruppe / Bereich", "Group / area"),
@@ -228,6 +237,11 @@ DEMO_MITARBEITER = {
         {"name": "Kevin Fischer", "wochenstunden": 40.0, "urlaub": 28, "rest": 0, "projekt": "Sanierung Rathausplatz"},
         {"name": "Sabine Roth", "wochenstunden": 35.0, "urlaub": 30, "rest": 4, "projekt": "Bürogebäude Nord"},
     ],
+    "Dienstleistung / Beratung": [
+        {"name": "Laura Becker", "wochenstunden": 40.0, "urlaub": 30, "rest": 2, "projekt": "Digitalisierung Muster GmbH"},
+        {"name": "Max König", "wochenstunden": 40.0, "urlaub": 30, "rest": 0, "projekt": "Prozessberatung Beispiel AG"},
+        {"name": "Sophie Wagner", "wochenstunden": 32.0, "urlaub": 30, "rest": 3, "projekt": "Automatisierung Kundenservice"},
+    ],
     "Kita / Soziales": [
         {"name": "Anna Müller", "wochenstunden": 39.0, "urlaub": 30, "rest": 2, "projekt": "Bärengruppe"},
         {"name": "Daniela Freitag", "wochenstunden": 30.0, "urlaub": 30, "rest": 1, "projekt": "Igelgruppe"},
@@ -253,6 +267,7 @@ DEMO_FIRMENNAMEN = {
     "Allgemein / Büro": "Beispiel Consulting GmbH",
     "Handwerk / Bau": "Mustermann Bau GmbH",
     "Kita / Soziales": "Kita Sonnenschein e.V.",
+    "Dienstleistung / Beratung": "Beispiel Beratung GmbH",
     "Pflege / Gesundheit": "Pflegedienst Lebensfreude GmbH",
     "Gastronomie / Hotel": "Hotel & Restaurant Musterhof",
     "Einzelhandel": "Modehaus Beispiel GmbH",
@@ -270,7 +285,15 @@ ABWESENHEITSARTEN = [
 SPALTEN_ZEITEN = [
     "ID", "Mitarbeiter", "Datum", "Kommen", "Gehen",
     "Brutto (Std)", "Pause (Min)", "Netto (Std)",
-    "Kategorie", "Projekt", "Notiz", "Typ", "Status",
+    "Kategorie", "Kunde-ID", "Projekt-ID", "Projekt", "Notiz", "Typ", "Status",
+]
+SPALTEN_KUNDEN = [
+    "Kunden-ID", "Kundennummer", "Kunde", "Ansprechpartner", "Telefon",
+    "E-Mail", "Straße", "PLZ", "Ort", "Aktiv", "Notiz",
+]
+SPALTEN_PROJEKTE = [
+    "Projekt-ID", "Projektnummer", "Projekt", "Kunden-ID", "Status",
+    "Startdatum", "Enddatum", "Stundensatz", "Aktiv", "Notiz",
 ]
 SPALTEN_URLAUB = [
     "ID", "Mitarbeiter", "Startdatum", "Enddatum", "Einheit", "Tage", "Stunden",
@@ -296,6 +319,7 @@ TEXTSPALTEN = {
     "Entscheidungsgrund", "Erfasst von",
     "MA-ID", "Mitarbeiter", "Personalnummer", "Benutzername", "Salt", "Passwort_Hash",
     "Rolle", "Sprache", "Projekt", "Notiz", "Kategorie", "Kommentar", "Art", "Einheit",
+    "Kunden-ID", "Kundennummer", "Kunde", "Ansprechpartner", "Telefon", "E-Mail", "Straße", "PLZ", "Ort", "Projekt-ID", "Projektnummer",
     "Status", "Typ", "Kommen", "Gehen", "Von", "Bis", "Wochentag", "ID",
 }
 
@@ -303,7 +327,8 @@ TEXTSPALTEN = {
 SPALTEN_LABELS_EN = {
     "Mitarbeiter": "Employee", "Datum": "Date", "Kommen": "Start", "Gehen": "End",
     "Brutto (Std)": "Gross (h)", "Pause (Min)": "Break (min)", "Netto (Std)": "Net (h)",
-    "Kategorie": "Category", "Projekt": "Project", "Notiz": "Note", "Typ": "Type",
+    "Kategorie": "Category", "Kunde-ID": "Customer ID", "Projekt-ID": "Project ID", "Kunde": "Customer",
+    "Projekt": "Project", "Notiz": "Note", "Typ": "Type",
     "Status": "Status", "Startdatum": "Start date", "Enddatum": "End date",
     "Einheit": "Unit", "Tage": "Days", "Stunden": "Hours", "Art": "Type",
     "Kommentar": "Comment", "Eingereicht am": "Submitted",
@@ -655,7 +680,7 @@ def _tabelle_vorhanden(conn, key: str) -> bool:
 
 def _fuer_db(df: pd.DataFrame) -> pd.DataFrame:
     """Datumswerte als ISO-Text, damit SQLite sie sortierbar und lesbar speichert."""
-    aus = df.copy()
+    aus = df.copy().drop(columns=["Kunde-ID", "Projekt-ID"], errors="ignore")
     for spalte in aus.columns:
         if spalte in DATUMSSPALTEN:
             aus[spalte] = aus[spalte].apply(lambda w: w.isoformat() if isinstance(w, date) else None)
@@ -741,6 +766,8 @@ TABELLEN_SCHLUESSEL = {
     "mitarbeiter_stammdaten": "MA-ID",
     "benutzer": "Benutzername",
     "arbeitszeitkalender": "KAL-ID",
+    "kunden": "Kunden-ID",
+    "projekte": "Projekt-ID",
 }
 
 
@@ -1378,6 +1405,13 @@ def _erstbefuellung() -> None:
         st.session_state.benutzer = pd.DataFrame(datensaetze, columns=SPALTEN_BENUTZER)
         speichern("benutzer")
 
+    if laden("kunden", SPALTEN_KUNDEN) is None:
+        st.session_state.kunden = pd.DataFrame(columns=SPALTEN_KUNDEN)
+        speichern("kunden")
+    if laden("projekte", SPALTEN_PROJEKTE) is None:
+        st.session_state.projekte = pd.DataFrame(columns=SPALTEN_PROJEKTE)
+        speichern("projekte")
+
     if not einstellungen_laden():
         einstellungen_speichern(STANDARD_CONFIG)
 
@@ -1501,6 +1535,11 @@ def daten_aktualisieren() -> None:
         _benutzer_nachziehen(konten) if konten is not None
         else pd.DataFrame(columns=SPALTEN_BENUTZER))
 
+    kunden = laden("kunden", SPALTEN_KUNDEN)
+    st.session_state.kunden = kunden if kunden is not None else pd.DataFrame(columns=SPALTEN_KUNDEN)
+    projekte = laden("projekte", SPALTEN_PROJEKTE)
+    st.session_state.projekte = projekte if projekte is not None else pd.DataFrame(columns=SPALTEN_PROJEKTE)
+
     gespeichert = einstellungen_laden()
     st.session_state.config = {**STANDARD_CONFIG, **gespeichert}
 
@@ -1587,6 +1626,72 @@ def branche_label(schluessel: str) -> str:
 def projekt_label() -> str:
     paar = branche()["projekt_label"]
     return paar[1] if ist_englisch() else paar[0]
+
+
+def kunden_projekte_aktiv() -> bool:
+    return cfg("branche") in {"Handwerk / Bau", "Dienstleistung / Beratung"}
+
+
+def aktive_kunden_df() -> pd.DataFrame:
+    df = st.session_state.get("kunden", pd.DataFrame(columns=SPALTEN_KUNDEN))
+    if df.empty:
+        return df
+    return df[df["Aktiv"].apply(lambda x: bool(x))].copy()
+
+
+def aktive_projekte_df(kunden_id: str | None = None) -> pd.DataFrame:
+    df = st.session_state.get("projekte", pd.DataFrame(columns=SPALTEN_PROJEKTE))
+    if df.empty:
+        return df
+    df = df[df["Aktiv"].apply(lambda x: bool(x))].copy()
+    if kunden_id and kunden_id != "__ALLE__":
+        df = df[df["Kunden-ID"].astype(str) == str(kunden_id)]
+    return df
+
+
+def projekt_optionen_fuer_kunde(kunden_id: str | None) -> list[str]:
+    """Liefert nur Projekte des gewählten Kunden. Ohne Kunde ist kein Projekt auswählbar."""
+    if not kunden_id or kunden_id == "__KEINER__":
+        return ["__KEINER__"]
+    pdf = aktive_projekte_df(kunden_id)
+    return ["__KEINER__"] + (pdf["Projekt-ID"].astype(str).tolist() if not pdf.empty else [])
+
+
+def projekt_widget_normalisieren(widget_key: str, optionen: list[str]) -> None:
+    """Setzt eine alte Projektauswahl zurück, wenn sie nach dem Kundenwechsel nicht mehr gültig ist."""
+    if st.session_state.get(widget_key) not in optionen:
+        st.session_state[widget_key] = optionen[0]
+
+
+def kunden_label(kunden_id: str) -> str:
+    df = st.session_state.get("kunden", pd.DataFrame(columns=SPALTEN_KUNDEN))
+    treffer = df[df["Kunden-ID"].astype(str) == str(kunden_id)] if not df.empty else df
+    if treffer.empty:
+        return "—"
+    r = treffer.iloc[0]
+    return f"{r['Kunde']} · {r['Kundennummer']}" if str(r.get("Kundennummer", "")).strip() else str(r["Kunde"])
+
+
+def projekt_label_id(projekt_id: str) -> str:
+    df = st.session_state.get("projekte", pd.DataFrame(columns=SPALTEN_PROJEKTE))
+    treffer = df[df["Projekt-ID"].astype(str) == str(projekt_id)] if not df.empty else df
+    if treffer.empty:
+        return "—"
+    r = treffer.iloc[0]
+    return f"{r['Projekt']} · {r['Projektnummer']}" if str(r.get("Projektnummer", "")).strip() else str(r["Projekt"])
+
+
+def zeit_mit_kunden_projekten(df: pd.DataFrame) -> pd.DataFrame:
+    out = df.copy()
+    if "Kunde-ID" not in out.columns: out["Kunde-ID"] = ""
+    if "Projekt-ID" not in out.columns: out["Projekt-ID"] = ""
+    if "Projekt" not in out.columns: out["Projekt"] = ""
+    out["Kunde"] = out["Kunde-ID"].astype(str).map(lambda x: kunden_label(x) if x and x != "nan" else "—")
+    def proj(row):
+        pid=str(row.get("Projekt-ID", ""))
+        return projekt_label_id(pid) if pid and pid != "nan" else str(row.get("Projekt", "") or "—")
+    out["Projekt"] = out.apply(proj, axis=1)
+    return out
 
 
 def kategorien() -> list[str]:
@@ -1748,7 +1853,25 @@ def demo_zuruecksetzen(branche_key: str, firmenname: str) -> None:
         ]))
     st.session_state.benutzer = pd.concat(neue_konten, ignore_index=True)
 
-    # 3) Beispiel-Zeiten der letzten Tage
+    # 3) Kunden und Projekte für auftragsbezogene Branchen
+    if branche_key in {"Handwerk / Bau", "Dienstleistung / Beratung"}:
+        kunden_demo = [
+            {"Kunden-ID": "kd-demo-01", "Kundennummer": "K-1001", "Kunde": "Musterkunde GmbH", "Ansprechpartner": "Thomas Muster", "Telefon": "089 123456", "E-Mail": "kontakt@musterkunde.de", "Straße": "Musterstraße 12", "PLZ": "80331", "Ort": "München", "Aktiv": True, "Notiz": "Demo-Kunde"},
+            {"Kunden-ID": "kd-demo-02", "Kundennummer": "K-1002", "Kunde": "Beispiel Immobilien GmbH", "Ansprechpartner": "Anna Beispiel", "Telefon": "089 654321", "E-Mail": "info@beispiel-immobilien.de", "Straße": "Hauptstraße 8", "PLZ": "80802", "Ort": "München", "Aktiv": True, "Notiz": "Demo-Kunde"},
+            {"Kunden-ID": "kd-demo-03", "Kundennummer": "K-1003", "Kunde": "Stadt & Partner", "Ansprechpartner": "Max Stadt", "Telefon": "089 987654", "E-Mail": "office@stadt-partner.de", "Straße": "Rathausplatz 1", "PLZ": "80333", "Ort": "München", "Aktiv": True, "Notiz": "Demo-Kunde"},
+        ]
+        projekte_demo = [
+            {"Projekt-ID": "pr-demo-01", "Projektnummer": "P-2001", "Projekt": "Neubau Musterstraße 12", "Kunden-ID": "kd-demo-01", "Status": "Laufend", "Startdatum": heute - timedelta(days=30), "Enddatum": heute + timedelta(days=120), "Stundensatz": 75.0, "Aktiv": True, "Notiz": "Demo-Projekt"},
+            {"Projekt-ID": "pr-demo-02", "Projektnummer": "P-2002", "Projekt": "Sanierung Rathausplatz", "Kunden-ID": "kd-demo-03", "Status": "Laufend", "Startdatum": heute - timedelta(days=14), "Enddatum": heute + timedelta(days=90), "Stundensatz": 82.5, "Aktiv": True, "Notiz": "Demo-Projekt"},
+            {"Projekt-ID": "pr-demo-03", "Projektnummer": "P-2003", "Projekt": "Bürogebäude Nord", "Kunden-ID": "kd-demo-02", "Status": "Offen", "Startdatum": heute, "Enddatum": None, "Stundensatz": 75.0, "Aktiv": True, "Notiz": "Demo-Projekt"},
+        ]
+        st.session_state.kunden = pd.DataFrame(kunden_demo, columns=SPALTEN_KUNDEN)
+        st.session_state.projekte = pd.DataFrame(projekte_demo, columns=SPALTEN_PROJEKTE)
+    else:
+        st.session_state.kunden = pd.DataFrame(columns=SPALTEN_KUNDEN)
+        st.session_state.projekte = pd.DataFrame(columns=SPALTEN_PROJEKTE)
+
+    # 4) Beispiel-Zeiten der letzten Tage
     zeilen = []
     for i, (stamm, demo) in enumerate(zip(neue_stamm, DEMO_MITARBEITER[branche_key])):
         for tag_offset, (kommen, gehen, kategorie, status) in enumerate([
@@ -1764,12 +1887,15 @@ def demo_zuruecksetzen(branche_key: str, firmenname: str) -> None:
                 "ID": neue_id(), "Mitarbeiter": stamm["Mitarbeiter"], "Datum": tag,
                 "Kommen": kommen.strftime(ZEITFORMAT), "Gehen": gehen.strftime(ZEITFORMAT),
                 "Brutto (Std)": brutto, "Pause (Min)": pause, "Netto (Std)": netto,
-                "Kategorie": kategorie, "Projekt": demo["projekt"], "Notiz": "",
+                "Kategorie": kategorie,
+                "Kunde-ID": ("kd-demo-01" if i == 0 else "kd-demo-03" if i == 1 else "kd-demo-02") if branche_key in {"Handwerk / Bau", "Dienstleistung / Beratung"} else "",
+                "Projekt-ID": ("pr-demo-01" if i == 0 else "pr-demo-02" if i == 1 else "pr-demo-03") if branche_key in {"Handwerk / Bau", "Dienstleistung / Beratung"} else "",
+                "Projekt": demo["projekt"], "Notiz": "",
                 "Typ": "Manuell", "Status": status,
             })
     st.session_state.time_logs = pd.DataFrame(zeilen, columns=SPALTEN_ZEITEN)
 
-    # 4) Ein Beispiel-Urlaubsantrag zur Veranschaulichung
+    # 5) Ein Beispiel-Urlaubsantrag zur Veranschaulichung
     erste = neue_stamm[0]
     st.session_state.vacation_requests = pd.DataFrame([{
         "ID": neue_id(), "Mitarbeiter": erste["Mitarbeiter"],
@@ -1780,10 +1906,10 @@ def demo_zuruecksetzen(branche_key: str, firmenname: str) -> None:
         "Eingereicht am": heute,
     }], columns=SPALTEN_URLAUB)
 
-    # 5) Branche und Firmenname übernehmen
+    # 6) Branche und Firmenname übernehmen
     st.session_state.config.update({"branche": branche_key, "firmenname": firmenname.strip() or firmenname})
 
-    for schluessel in ("mitarbeiter_stammdaten", "benutzer", "time_logs", "vacation_requests"):
+    for schluessel in ("mitarbeiter_stammdaten", "benutzer", "kunden", "projekte", "time_logs", "vacation_requests"):
         speichern(schluessel)
     einstellungen_speichern(st.session_state.config)
 
@@ -2078,7 +2204,7 @@ def tabelle(df: pd.DataFrame, status_spalte="Status", **kwargs) -> None:
 
 
 def konvertiere_zu_excel(df: pd.DataFrame) -> bytes:
-    export = anzeige_df(df)
+    export = anzeige_df(zeit_mit_kunden_projekten(df))
     for spalte in export.columns:
         if pd.api.types.is_datetime64_any_dtype(export[spalte]):
             export[spalte] = export[spalte].dt.strftime(DATUMSFORMAT)
@@ -2868,7 +2994,19 @@ if st.session_state.role == "Mitarbeiter":
                 if len(kategorien()) > 1:
                     kategorie_live = st.selectbox(t("Tätigkeit", "Activity"), kategorien(),
                                                   format_func=wert_label, key="live_kat")
-                projekt_live = st.text_input(projekt_label(), key="live_projekt") if B["projekt_aktiv"] else ""
+                kunde_live_id, projekt_live_id, projekt_live_name = "", "", ""
+                if B["projekt_aktiv"]:
+                    if kunden_projekte_aktiv():
+                        kdf = aktive_kunden_df(); kopt = ["__KEINER__"] + (kdf["Kunden-ID"].astype(str).tolist() if not kdf.empty else [])
+                        kunde_live_id = st.selectbox(t("Kunde", "Customer"), kopt, format_func=lambda x: t("Kein Kunde", "No customer") if x == "__KEINER__" else kunden_label(x), key="live_kunde")
+                        if kunde_live_id == "__KEINER__": kunde_live_id = ""
+                        popt = projekt_optionen_fuer_kunde(kunde_live_id)
+                        projekt_widget_normalisieren("live_projekt_id", popt)
+                        projekt_live_id = st.selectbox(t("Projekt", "Project"), popt, format_func=lambda x: t("Kein Projekt", "No project") if x == "__KEINER__" else projekt_label_id(x), key="live_projekt_id")
+                        if projekt_live_id == "__KEINER__": projekt_live_id = ""
+                        projekt_live_name = projekt_label_id(projekt_live_id) if projekt_live_id else ""
+                    else:
+                        projekt_live_name = st.text_input(projekt_label(), key="live_projekt")
                 if st.button(t("▶️ ARBEIT STARTEN", "▶️ START WORK"), key="btn_kommen",
                              use_container_width=True):
                     jetzt_zeit = datetime.now()
@@ -2882,7 +3020,7 @@ if st.session_state.role == "Mitarbeiter":
                         {"ID": neue_id(), "Mitarbeiter": benutzer, "Datum": jetzt_zeit.date(),
                          "Kommen": jetzt_zeit.strftime(ZEITFORMAT), "Gehen": "",
                          "Brutto (Std)": pd.NA, "Pause (Min)": pd.NA, "Netto (Std)": pd.NA,
-                         "Kategorie": kategorie_live, "Projekt": str(projekt_live).strip(),
+                         "Kategorie": kategorie_live, "Kunde-ID": str(kunde_live_id), "Projekt-ID": str(projekt_live_id), "Projekt": str(projekt_live_name).strip(),
                          "Notiz": "", "Typ": "Live", "Status": "Läuft"})
                     speichern("time_logs")
                     melde("Zeiterfassung gestartet.", "Time tracking started.", "▶️")
@@ -2939,7 +3077,19 @@ if st.session_state.role == "Mitarbeiter":
                                              "The statutory minimum break is deducted automatically."))
             m_kategorie = st.selectbox(t("Tätigkeit", "Activity"), kategorien(),
                                        format_func=wert_label, key="ma_kat")
-            m_projekt = st.text_input(projekt_label(), key="ma_projekt") if B["projekt_aktiv"] else ""
+            m_kunde_id, m_projekt_id, m_projekt_name = "", "", ""
+            if B["projekt_aktiv"]:
+                if kunden_projekte_aktiv():
+                    kdf = aktive_kunden_df(); kopt = ["__KEINER__"] + (kdf["Kunden-ID"].astype(str).tolist() if not kdf.empty else [])
+                    m_kunde_id = st.selectbox(t("Kunde", "Customer"), kopt, format_func=lambda x: t("Kein Kunde", "No customer") if x == "__KEINER__" else kunden_label(x), key="ma_kunde")
+                    if m_kunde_id == "__KEINER__": m_kunde_id = ""
+                    popt = projekt_optionen_fuer_kunde(m_kunde_id)
+                    projekt_widget_normalisieren("ma_projekt_id", popt)
+                    m_projekt_id = st.selectbox(t("Projekt", "Project"), popt, format_func=lambda x: t("Kein Projekt", "No project") if x == "__KEINER__" else projekt_label_id(x), key="ma_projekt_id")
+                    if m_projekt_id == "__KEINER__": m_projekt_id = ""
+                    m_projekt_name = projekt_label_id(m_projekt_id) if m_projekt_id else ""
+                else:
+                    m_projekt_name = st.text_input(projekt_label(), key="ma_projekt")
             m_notiz = st.text_input(t("Notiz", "Note"), key="ma_notiz")
 
         if st.button(t("💾 Speichern", "💾 Save"), use_container_width=True, type="primary",
@@ -2965,7 +3115,7 @@ if st.session_state.role == "Mitarbeiter":
                         {"ID": neue_id(), "Mitarbeiter": benutzer, "Datum": m_datum,
                          "Kommen": m_kommen.strftime(ZEITFORMAT), "Gehen": m_gehen.strftime(ZEITFORMAT),
                          "Brutto (Std)": brutto, "Pause (Min)": pause, "Netto (Std)": netto,
-                         "Kategorie": m_kategorie, "Projekt": str(m_projekt).strip(),
+                         "Kategorie": m_kategorie, "Kunde-ID": str(m_kunde_id), "Projekt-ID": str(m_projekt_id), "Projekt": str(m_projekt_name).strip(),
                          "Notiz": str(m_notiz).strip(), "Typ": "Manuell", "Status": "Erfasst"})
                     speichern("time_logs")
                     melde(f"Gespeichert: {netto:.2f} Std.", f"Saved: {netto:.2f} h", "💾")
@@ -3452,11 +3602,14 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
             st.session_state.pop("_zeit_kollisionsmeldung", None)
             st.rerun()
 
-    tab_meine_zeit, tab_zeiten, tab_antraege, tab_stamm, tab_konten, tab_einst, tab_hilfe = st.tabs([
+    tab_meine_zeit, tab_zeiten, tab_auswertung, tab_antraege, tab_stamm, tab_kunden, tab_projekte, tab_konten, tab_einst, tab_hilfe = st.tabs([
         t("🕒 Meine Arbeitszeit", "🕒 My working time"),
         t("📊 Zeiten & Export", "📊 Times & export"),
+        t("📈 Auswertung", "📈 Analysis"),
         t("🌴 Anträge", "🌴 Requests"),
         t("👥 Stammdaten", "👥 Employees"),
+        t("👤 Kunden", "👤 Customers"),
+        t("📁 Projekte", "📁 Projects"),
         t("🔐 Benutzerkonten", "🔐 User accounts"),
         t("⚙️ Einstellungen", "⚙️ Settings"),
         t("❓ Hilfe", "❓ Help"),
@@ -3515,8 +3668,19 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                 kategorie = s1.selectbox(t("Kategorie", "Category"), kategorien(),
                                          format_func=wert_label, disabled=not offen.empty,
                                          key="admin_eigene_kategorie")
-                projekt = s2.text_input(projekt_label(), disabled=not offen.empty,
-                                        key="admin_eigenes_projekt") if B["projekt_aktiv"] else ""
+                admin_kunde_id, admin_projekt_id, projekt = "", "", ""
+                if B["projekt_aktiv"]:
+                    if kunden_projekte_aktiv():
+                        kdf = aktive_kunden_df(); kopt = ["__KEINER__"] + (kdf["Kunden-ID"].astype(str).tolist() if not kdf.empty else [])
+                        admin_kunde_id = s2.selectbox(t("Kunde", "Customer"), kopt, format_func=lambda x: t("Kein Kunde", "No customer") if x == "__KEINER__" else kunden_label(x), disabled=not offen.empty, key="admin_eigenes_kunde")
+                        if admin_kunde_id == "__KEINER__": admin_kunde_id = ""
+                        popt = projekt_optionen_fuer_kunde(admin_kunde_id)
+                        projekt_widget_normalisieren("admin_eigenes_projekt", popt)
+                        admin_projekt_id = s2.selectbox(t("Projekt", "Project"), popt, format_func=lambda x: t("Kein Projekt", "No project") if x == "__KEINER__" else projekt_label_id(x), disabled=not offen.empty, key="admin_eigenes_projekt")
+                        if admin_projekt_id == "__KEINER__": admin_projekt_id = ""
+                        projekt = projekt_label_id(admin_projekt_id) if admin_projekt_id else ""
+                    else:
+                        projekt = s2.text_input(projekt_label(), disabled=not offen.empty, key="admin_eigenes_projekt")
                 b1, b2 = st.columns(2)
                 if b1.button(t("▶️ KOMMEN", "▶️ CLOCK IN"), key="admin_btn_kommen",
                              use_container_width=True, disabled=not offen.empty or not live_aktiv):
@@ -3530,7 +3694,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                         {"ID": neue_id(), "Mitarbeiter": benutzer, "Datum": now.date(),
                          "Kommen": now.strftime(ZEITFORMAT), "Gehen": "",
                          "Brutto (Std)": pd.NA, "Pause (Min)": pd.NA, "Netto (Std)": pd.NA,
-                         "Kategorie": kategorie, "Projekt": projekt.strip(), "Notiz": "",
+                         "Kategorie": kategorie, "Kunde-ID": str(admin_kunde_id), "Projekt-ID": str(admin_projekt_id), "Projekt": projekt.strip(), "Notiz": "",
                          "Typ": "Live", "Status": "Läuft"})
                     speichern("time_logs")
                     melde("Eingestempelt.", "Clocked in.", "▶️")
@@ -3565,7 +3729,19 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                     m_pause = c3.number_input(t("Pause (Min.)", "Break (min)"), 0, 480, 0, 5, key="admin_nach_pause")
                     c4, c5 = st.columns(2)
                     m_kategorie = c4.selectbox(t("Kategorie", "Category"), kategorien(), format_func=wert_label, key="admin_nach_kat")
-                    m_projekt = c5.text_input(projekt_label(), key="admin_nach_projekt") if B["projekt_aktiv"] else ""
+                    admin_nach_kunde_id, admin_nach_projekt_id, m_projekt = "", "", ""
+                    if B["projekt_aktiv"]:
+                        if kunden_projekte_aktiv():
+                            kdf = aktive_kunden_df(); kopt = ["__KEINER__"] + (kdf["Kunden-ID"].astype(str).tolist() if not kdf.empty else [])
+                            admin_nach_kunde_id = c5.selectbox(t("Kunde", "Customer"), kopt, format_func=lambda x: t("Kein Kunde", "No customer") if x == "__KEINER__" else kunden_label(x), key="admin_nach_kunde")
+                            if admin_nach_kunde_id == "__KEINER__": admin_nach_kunde_id = ""
+                            popt = projekt_optionen_fuer_kunde(admin_nach_kunde_id)
+                            projekt_widget_normalisieren("admin_nach_projekt", popt)
+                            admin_nach_projekt_id = st.selectbox(t("Projekt", "Project"), popt, format_func=lambda x: t("Kein Projekt", "No project") if x == "__KEINER__" else projekt_label_id(x), key="admin_nach_projekt")
+                            if admin_nach_projekt_id == "__KEINER__": admin_nach_projekt_id = ""
+                            m_projekt = projekt_label_id(admin_nach_projekt_id) if admin_nach_projekt_id else ""
+                        else:
+                            m_projekt = c5.text_input(projekt_label(), key="admin_nach_projekt")
                     m_notiz = st.text_input(t("Notiz (optional)", "Note (optional)"), key="admin_nach_notiz")
                     gespeichert = st.form_submit_button(t("💾 Zeit speichern", "💾 Save time"), use_container_width=True, type="primary")
                 if gespeichert:
@@ -3585,7 +3761,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                             {"ID": neue_id(), "Mitarbeiter": benutzer, "Datum": m_datum,
                              "Kommen": m_kommen.strftime(ZEITFORMAT), "Gehen": m_gehen.strftime(ZEITFORMAT),
                              "Brutto (Std)": brutto, "Pause (Min)": pause, "Netto (Std)": netto,
-                             "Kategorie": m_kategorie, "Projekt": m_projekt.strip(), "Notiz": m_notiz.strip(),
+                             "Kategorie": m_kategorie, "Kunde-ID": str(admin_nach_kunde_id), "Projekt-ID": str(admin_nach_projekt_id), "Projekt": m_projekt.strip(), "Notiz": m_notiz.strip(),
                              "Typ": "Manuell", "Status": "Erfasst"})
                         speichern("time_logs")
                         melde(f"Zeit gespeichert: {netto:.2f} Std. netto, Pause {pause} Min.",
@@ -3689,7 +3865,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                 for c in ("Brutto (Std)", "Netto (Std)"):
                     edit[c] = pd.to_numeric(edit[c], errors="coerce")
                 edit["Löschen"] = False
-                edit = edit[["ID", "Mitarbeiter", "Datum", "Kommen", "Gehen", "Pause (Min)", "Kategorie", "Projekt", "Notiz", "Typ", "Status", "Netto (Std)", "Löschen"]]
+                edit = edit[["ID", "Mitarbeiter", "Datum", "Kommen", "Gehen", "Pause (Min)", "Kategorie", "Kunde-ID", "Projekt-ID", "Projekt", "Notiz", "Typ", "Status", "Netto (Std)", "Löschen"]]
                 typ_optionen = list(dict.fromkeys(["Normal", "Korrigiert", "Nachtrag", "Import"] + [str(x) for x in edit["Typ"].dropna().unique() if str(x) not in ("", "nan")]))
                 status_optionen = ["Läuft", "Erfasst", "Freigegeben"]
                 kategorie_optionen = list(dict.fromkeys(kategorien() + [str(x) for x in edit["Kategorie"].dropna().unique() if str(x) not in ("", "nan")]))
@@ -3700,6 +3876,8 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                     "Gehen": st.column_config.TextColumn(spalten_label("Gehen"), validate=r"^([01]?\d|2[0-3]):[0-5]\d$"),
                     "Pause (Min)": st.column_config.NumberColumn(spalten_label("Pause (Min)"), min_value=0, max_value=480, step=5, format="%d"),
                     "Kategorie": st.column_config.SelectboxColumn(spalten_label("Kategorie"), options=kategorie_optionen),
+                    "Kunde-ID": st.column_config.SelectboxColumn(t("Kunde", "Customer"), options=[str(x) for x in aktive_kunden_df()["Kunden-ID"].tolist()] if not aktive_kunden_df().empty else []),
+                    "Projekt-ID": st.column_config.SelectboxColumn(t("Projekt", "Project"), options=[str(x) for x in aktive_projekte_df()["Projekt-ID"].tolist()] if not aktive_projekte_df().empty else []),
                     "Typ": st.column_config.SelectboxColumn(spalten_label("Typ"), options=typ_optionen),
                     "Status": st.column_config.SelectboxColumn(spalten_label("Status"), options=status_optionen),
                     "Netto (Std)": st.column_config.NumberColumn(spalten_label("Netto (Std)"), disabled=True, format="%.2f"),
@@ -3750,9 +3928,9 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                         # Durchgang sich nicht gegenseitig überlappen können
                         pruefbestaende[person] = [b for b in pruefbestaende[person] if b.id != str(row["ID"])]
                         pruefbestaende[person].append(Buchung(str(row["ID"]), datum, kommen, gehen))
-                        logs.loc[mask, ["Mitarbeiter", "Datum", "Kommen", "Gehen", "Brutto (Std)", "Pause (Min)", "Netto (Std)", "Kategorie", "Projekt", "Notiz", "Typ", "Status"]] = [
+                        logs.loc[mask, ["Mitarbeiter", "Datum", "Kommen", "Gehen", "Brutto (Std)", "Pause (Min)", "Netto (Std)", "Kategorie", "Kunde-ID", "Projekt-ID", "Projekt", "Notiz", "Typ", "Status"]] = [
                             str(row["Mitarbeiter"]), datum, kommen.strftime(ZEITFORMAT), gehen.strftime(ZEITFORMAT), brutto, pause, netto,
-                            str(row.get("Kategorie", "")), str(row.get("Projekt", "") or ""), str(row.get("Notiz", "") or ""), str(row.get("Typ", "Korrigiert") or "Korrigiert"), str(row.get("Status", "Erfasst"))
+                            str(row.get("Kategorie", "")), str(row.get("Kunde-ID", "") or ""), str(row.get("Projekt-ID", "") or ""), str(row.get("Projekt", "") or ""), str(row.get("Notiz", "") or ""), str(row.get("Typ", "Korrigiert") or "Korrigiert"), str(row.get("Status", "Erfasst"))
                         ]
                     if fehler:
                         # Bei Fehlern wird nichts gespeichert – sonst landet ein
@@ -3975,6 +4153,85 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                         if c_del2.button("Abbrechen", key=f"sys_zeit_delete_cancel_{ziel_id}", use_container_width=True):
                             st.session_state[f"sys_zeit_delete_confirm_{ziel_id}"] = False
                             st.rerun()
+
+    # ---------------- Auswertung ----------------
+    with tab_auswertung:
+        if not kunden_projekte_aktiv():
+            st.info(t("Die Kunden-/Projekt-Auswertung ist für Handwerk/Bau und Dienstleistung/Beratung vorgesehen. Wählen Sie diese Branche unter Einstellungen, um sie zu aktivieren.", "Customer/project analysis is intended for trades/construction and services/consulting. Select one of these industries under Settings to activate it."))
+        else:
+            st.markdown(f"### {t('Auswertung nach Kunde & Projekt', 'Customer & project analysis')}")
+            heute_a = date.today()
+            c1, c2 = st.columns(2)
+            avon = c1.date_input(t("Von", "From"), heute_a.replace(day=1), format=DATUMSFORMAT_UI, key="aus_von")
+            abis = c2.date_input(t("Bis", "To"), heute_a, format=DATUMSFORMAT_UI, key="aus_bis")
+            if avon > abis:
+                st.error(t("Von darf nicht nach Bis liegen.", "From cannot be after To."))
+            else:
+                kunden_df_a = aktive_kunden_df()
+                kunden_ids_a = ["__ALLE__"] + (kunden_df_a["Kunden-ID"].astype(str).tolist() if not kunden_df_a.empty else [])
+                aus_kunde = st.selectbox(t("Kunde", "Customer"), kunden_ids_a, format_func=lambda x: t("Alle Kunden", "All customers") if x == "__ALLE__" else kunden_label(x), key="aus_kunde")
+                proj_df_a = aktive_projekte_df(aus_kunde)
+                proj_ids_a = ["__ALLE__"] + (proj_df_a["Projekt-ID"].astype(str).tolist() if not proj_df_a.empty else [])
+                aus_projekt = st.selectbox(t("Projekt", "Project"), proj_ids_a, format_func=lambda x: t("Alle Projekte", "All projects") if x == "__ALLE__" else projekt_label_id(x), key="aus_projekt")
+                ma_ids_a = ["__ALLE__"] + [str(x) for x in aktive_mitarbeiter()]
+                aus_ma = st.selectbox(t("Mitarbeiter", "Employee"), ma_ids_a, format_func=lambda x: t("Alle Mitarbeiter", "All employees") if x == "__ALLE__" else x, key="aus_ma")
+                df_a = zeiten_von(None, avon, abis).copy()
+                if "Kunde-ID" not in df_a.columns: df_a["Kunde-ID"] = ""
+                if "Projekt-ID" not in df_a.columns: df_a["Projekt-ID"] = ""
+                if aus_kunde != "__ALLE__": df_a = df_a[df_a["Kunde-ID"].astype(str) == aus_kunde]
+                if aus_projekt != "__ALLE__": df_a = df_a[df_a["Projekt-ID"].astype(str) == aus_projekt]
+                if aus_ma != "__ALLE__": df_a = df_a[df_a["Mitarbeiter"].astype(str) == aus_ma]
+                df_a = zeit_mit_kunden_projekten(df_a)
+                if df_a.empty:
+                    st.info(t("Keine Zeiteinträge für die gewählten Filter.", "No time entries for the selected filters."))
+                else:
+                    stunden_a = pd.to_numeric(df_a["Netto (Std)"], errors="coerce").fillna(0)
+                    k1,k2,k3 = st.columns(3)
+                    k1.metric(t("Einträge", "Entries"), len(df_a))
+                    k2.metric(t("Netto-Stunden", "Net hours"), f"{stunden_a.sum():.2f}")
+                    k3.metric(t("Projekte", "Projects"), int(df_a["Projekt-ID"].astype(str).replace("", pd.NA).nunique(dropna=True)))
+                    by_proj = (df_a.assign(_stunden=stunden_a).groupby(["Kunde", "Projekt"], dropna=False, as_index=False).agg(**{"Einträge": ("ID", "count"), "Netto-Stunden": ("_stunden", "sum")}))
+                    by_proj["Netto-Stunden"] = by_proj["Netto-Stunden"].round(2)
+                    st.markdown(f"#### {t('Stunden je Kunde / Projekt', 'Hours by customer / project')}")
+                    st.dataframe(by_proj, use_container_width=True, hide_index=True)
+                    by_ma = (df_a.assign(_stunden=stunden_a).groupby(["Mitarbeiter"], as_index=False).agg(**{"Einträge": ("ID", "count"), "Netto-Stunden": ("_stunden", "sum")}))
+                    by_ma["Netto-Stunden"] = by_ma["Netto-Stunden"].round(2)
+                    st.markdown(f"#### {t('Stunden je Mitarbeiter', 'Hours by employee')}")
+                    st.dataframe(by_ma, use_container_width=True, hide_index=True)
+
+                    # Detaillierte Zuordnung Mitarbeiter -> Kunde -> Projekt.
+                    # Damit kann der Betrieb direkt sehen, wer wie viele Stunden
+                    # auf welchem Projekt gebucht hat.
+                    by_ma_proj = (
+                        df_a.assign(_stunden=stunden_a)
+                        .groupby(["Kunde", "Projekt", "Mitarbeiter"], dropna=False, as_index=False)
+                        .agg(**{"Einträge": ("ID", "count"), "Netto-Stunden": ("_stunden", "sum")})
+                    )
+                    by_ma_proj["Netto-Stunden"] = by_ma_proj["Netto-Stunden"].round(2)
+                    st.markdown(f"#### {t('Mitarbeiter je Kunde / Projekt', 'Employees by customer / project')}")
+                    st.dataframe(by_ma_proj, use_container_width=True, hide_index=True)
+
+                    # Kreuztabelle für einen schnellen Monats-/Zeitraumüberblick.
+                    matrix = pd.pivot_table(
+                        df_a.assign(_stunden=stunden_a),
+                        index="Mitarbeiter", columns="Projekt", values="_stunden",
+                        aggfunc="sum", fill_value=0
+                    ).reset_index()
+                    if not matrix.empty:
+                        numeric_cols = [c for c in matrix.columns if c != "Mitarbeiter"]
+                        matrix[numeric_cols] = matrix[numeric_cols].round(2)
+                        st.markdown(f"#### {t('Übersicht Mitarbeiter × Projekt', 'Employee × project overview')}")
+                        st.dataframe(matrix, use_container_width=True, hide_index=True)
+
+                    export_a = df_a[[c for c in ["Mitarbeiter","Datum","Kommen","Gehen","Netto (Std)","Kunde","Projekt","Kategorie","Notiz","Status"] if c in df_a.columns]].copy()
+                    puffer_a = io.BytesIO()
+                    with pd.ExcelWriter(puffer_a, engine="openpyxl") as writer:
+                        export_a.to_excel(writer, index=False, sheet_name="Zeiten")
+                        by_proj.to_excel(writer, index=False, sheet_name="Kunde_Projekt")
+                        by_ma.to_excel(writer, index=False, sheet_name="Mitarbeiter")
+                        by_ma_proj.to_excel(writer, index=False, sheet_name="Mitarbeiter_Projekt")
+                        matrix.to_excel(writer, index=False, sheet_name="Matrix")
+                    st.download_button(t("📥 Auswertung als Excel", "📥 Export analysis to Excel"), data=puffer_a.getvalue(), file_name=f"Auswertung_{avon:%Y%m%d}_{abis:%Y%m%d}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
 
     # ---------------- Anträge ----------------
     with tab_antraege:
@@ -4600,6 +4857,79 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                 if c_del2.button("Abbrechen", key="sys_ma_delete_cancel", use_container_width=True):
                     st.session_state["sys_ma_delete_confirm"] = False
                     st.rerun()
+
+    # ---------------- Kunden ----------------
+    with tab_kunden:
+        if not kunden_projekte_aktiv():
+            st.info(t("Das Kundenmodul wird für Handwerk/Bau und Dienstleistung/Beratung angezeigt.", "The customer module is shown for trades/construction and services/consulting."))
+        else:
+            st.markdown(f"### {t('Kundenverwaltung', 'Customer management')}")
+            with st.expander(t("➕ Neuen Kunden anlegen", "➕ Add customer"), expanded=False):
+                c1,c2,c3 = st.columns(3)
+                knr = c1.text_input(t("Kundennummer", "Customer no."), key="neu_kundennr")
+                kn = c2.text_input(t("Kunde / Firma", "Customer / company"), key="neu_kunde")
+                ap = c3.text_input(t("Ansprechpartner", "Contact person"), key="neu_kunden_ap")
+                c1,c2,c3 = st.columns(3)
+                tel = c1.text_input(t("Telefon", "Phone"), key="neu_kunden_tel")
+                email = c2.text_input(t("E-Mail", "Email"), key="neu_kunden_email")
+                ort = c3.text_input(t("Ort", "City"), key="neu_kunden_ort")
+                strasse = st.text_input(t("Straße", "Street"), key="neu_kunden_strasse")
+                notiz = st.text_input(t("Notiz", "Note"), key="neu_kunden_notiz")
+                if st.button(t("💾 Kunde anlegen", "💾 Add customer"), key="kunde_anlegen", type="primary"):
+                    if not kn.strip(): st.error(t("Bitte einen Kundennamen eingeben.", "Please enter a customer name."))
+                    else:
+                        nr = knr.strip() or f"K-{len(st.session_state.kunden)+1:04d}"
+                        st.session_state.kunden = zeile_anhaengen(st.session_state.kunden, {"Kunden-ID": neue_id(), "Kundennummer": nr, "Kunde": kn.strip(), "Ansprechpartner": ap.strip(), "Telefon": tel.strip(), "E-Mail": email.strip(), "Straße": strasse.strip(), "PLZ": "", "Ort": ort.strip(), "Aktiv": True, "Notiz": notiz.strip()})
+                        speichern("kunden"); melde(f"Kunde „{kn.strip()}“ angelegt.", "Customer created.", "👤"); st.rerun()
+            if st.session_state.kunden.empty:
+                st.info(t("Noch keine Kunden angelegt.", "No customers yet."))
+            else:
+                kunden_edit = st.session_state.kunden.copy(); kunden_edit["Löschen"] = False
+                edited_k = st.data_editor(kunden_edit, use_container_width=True, hide_index=True, num_rows="fixed", key="kunden_editor", column_config={"Kunden-ID": st.column_config.TextColumn("ID", disabled=True), "Aktiv": st.column_config.CheckboxColumn("Aktiv"), "Löschen": st.column_config.CheckboxColumn("Löschen")})
+                if st.button(t("💾 Kundenänderungen speichern", "💾 Save customer changes"), key="kunden_speichern", type="primary"):
+                    if bool(edited_k["Löschen"].fillna(False).any()):
+                        ids = set(edited_k.loc[edited_k["Löschen"].fillna(False), "Kunden-ID"].astype(str))
+                        linked = not st.session_state.projekte.empty and st.session_state.projekte["Kunden-ID"].astype(str).isin(ids).any()
+                        if linked: st.error(t("Kunden mit verknüpften Projekten können nicht gelöscht werden. Setze sie auf Inaktiv.", "Customers with linked projects cannot be deleted. Set them inactive."))
+                        else:
+                            edited_k = edited_k[~edited_k["Löschen"].fillna(False)].copy().drop(columns=["Löschen"])
+                            st.session_state.kunden = edited_k.reset_index(drop=True); speichern("kunden"); st.rerun()
+                    else:
+                        st.session_state.kunden = edited_k.drop(columns=["Löschen"]).reset_index(drop=True); speichern("kunden"); st.rerun()
+
+    # ---------------- Projekte ----------------
+    with tab_projekte:
+        if not kunden_projekte_aktiv():
+            st.info(t("Das Projektmodul wird für Handwerk/Bau und Dienstleistung/Beratung angezeigt.", "The project module is shown for trades/construction and services/consulting."))
+        else:
+            st.markdown(f"### {t('Projektverwaltung', 'Project management')}")
+            with st.expander(t("➕ Neues Projekt anlegen", "➕ Add project"), expanded=False):
+                c1,c2,c3 = st.columns(3)
+                pnr = c1.text_input(t("Projektnummer", "Project no."), key="neu_projektnr")
+                pname = c2.text_input(t("Projektname", "Project name"), key="neu_projektname")
+                kdf = aktive_kunden_df(); kop = kdf["Kunden-ID"].astype(str).tolist() if not kdf.empty else []
+                pkunde = c3.selectbox(t("Kunde", "Customer"), ["__KEINER__"] + kop, format_func=lambda x: t("Kein Kunde", "No customer") if x == "__KEINER__" else kunden_label(x), key="neu_projektkunde")
+                c1,c2,c3 = st.columns(3)
+                status = c1.selectbox(t("Status", "Status"), ["Offen", "Laufend", "Abgeschlossen", "Pausiert"], key="neu_projektstatus")
+                start = c2.date_input(t("Startdatum", "Start date"), date.today(), format=DATUMSFORMAT_UI, key="neu_projektstart")
+                ende = c3.date_input(t("Enddatum", "End date"), None, format=DATUMSFORMAT_UI, key="neu_projektende")
+                satz = st.number_input(t("Stundensatz (optional)", "Hourly rate (optional)"), min_value=0.0, step=5.0, key="neu_projektsatz")
+                pnotiz = st.text_input(t("Notiz", "Note"), key="neu_projektnotiz")
+                if st.button(t("💾 Projekt anlegen", "💾 Add project"), key="projekt_anlegen", type="primary"):
+                    if not pname.strip(): st.error(t("Bitte einen Projektnamen eingeben.", "Please enter a project name."))
+                    elif pkunde == "__KEINER__": st.error(t("Bitte einen Kunden auswählen.", "Please select a customer."))
+                    elif ende is not None and ende < start: st.error(t("Das Enddatum darf nicht vor dem Startdatum liegen.", "End date cannot be before start date."))
+                    else:
+                        nr = pnr.strip() or f"P-{len(st.session_state.projekte)+1:04d}"
+                        st.session_state.projekte = zeile_anhaengen(st.session_state.projekte, {"Projekt-ID": neue_id(), "Projektnummer": nr, "Projekt": pname.strip(), "Kunden-ID": pkunde, "Status": status, "Startdatum": start, "Enddatum": ende, "Stundensatz": float(satz), "Aktiv": True, "Notiz": pnotiz.strip()})
+                        speichern("projekte"); melde(f"Projekt „{pname.strip()}“ angelegt.", "Project created.", "📁"); st.rerun()
+            if st.session_state.projekte.empty:
+                st.info(t("Noch keine Projekte angelegt.", "No projects yet."))
+            else:
+                proj_edit = st.session_state.projekte.copy(); proj_edit["Löschen"] = False
+                edited_p = st.data_editor(proj_edit, use_container_width=True, hide_index=True, num_rows="fixed", key="projekte_editor", column_config={"Projekt-ID": st.column_config.TextColumn("ID", disabled=True), "Kunden-ID": st.column_config.SelectboxColumn("Kunde", options=aktive_kunden_df()["Kunden-ID"].astype(str).tolist() if not aktive_kunden_df().empty else []), "Startdatum": st.column_config.DateColumn("Startdatum", format=DATUMSFORMAT_UI), "Enddatum": st.column_config.DateColumn("Enddatum", format=DATUMSFORMAT_UI), "Stundensatz": st.column_config.NumberColumn("Stundensatz", min_value=0.0, step=5.0, format="%.2f"), "Aktiv": st.column_config.CheckboxColumn("Aktiv"), "Löschen": st.column_config.CheckboxColumn("Löschen")})
+                if st.button(t("💾 Projektänderungen speichern", "💾 Save project changes"), key="projekte_speichern", type="primary"):
+                    st.session_state.projekte = edited_p.drop(columns=["Löschen"]).reset_index(drop=True); speichern("projekte"); st.rerun()
 
     # ---------------- Benutzerkonten ----------------
     with tab_konten:
