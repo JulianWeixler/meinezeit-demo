@@ -191,7 +191,9 @@ BRANCHEN = {
     "Kita / Soziales": {
         "label": ("Kita / Soziales", "Childcare / social work"),
         "projekt_label": ("Gruppe / Bereich", "Group / area"),
-        "projekt_aktiv": True,
+        # Kitas buchen weder auf Kunden noch auf Projekte – das Feld würde die
+        # Erfassung nur verlängern, ohne ausgewertet zu werden.
+        "projekt_aktiv": False,
         "kategorien": [("Arbeitszeit", "Working time"), ("Vorbereitungszeit", "Preparation"),
                        ("Elterngespräch", "Parent meeting"), ("Fortbildung", "Training")],
         "wochenstunden": 39.0,
@@ -2288,7 +2290,9 @@ def tabelle(df: pd.DataFrame, status_spalte="Status", **kwargs) -> None:
 
 
 def konvertiere_zu_excel(df: pd.DataFrame) -> bytes:
-    export = anzeige_df(zeit_mit_kunden_projekten(df))
+    # Ohne Kunden-/Projektmodul würden zwei leere Spalten im Export landen
+    aufbereitet = zeit_mit_kunden_projekten(df) if kunden_projekte_aktiv() else df
+    export = anzeige_df(aufbereitet)
     for spalte in export.columns:
         if pd.api.types.is_datetime64_any_dtype(export[spalte]):
             export[spalte] = export[spalte].dt.strftime(DATUMSFORMAT)
@@ -3115,11 +3119,14 @@ if st.session_state.role == "Mitarbeiter":
                         if kunde_live_id == "__KEINER__": kunde_live_id = ""
                         popt = projekt_optionen_fuer_kunde(kunde_live_id)
                         projekt_widget_normalisieren("live_projekt_id", popt)
-                        projekt_live_id = st.selectbox(t("Projekt", "Project"), popt,
+                        projekt_live_id = st.selectbox(t("Projekt (optional)", "Project (optional)"), popt,
                                                        index=vorauswahl_index(popt, letztes_projekt),
-                                                       format_func=lambda x: t("Kein Projekt", "No project") if x == "__KEINER__" else projekt_label_id(x), key="live_projekt_id")
+                                                       format_func=lambda x: t("— ohne Projekt —", "— no project —") if x == "__KEINER__" else projekt_label_id(x), key="live_projekt_id")
                         if projekt_live_id == "__KEINER__": projekt_live_id = ""
                         projekt_live_name = projekt_label_id(projekt_live_id) if projekt_live_id else ""
+                        if kunde_live_id and not projekt_live_id:
+                            st.caption(t("Wird nur auf den Kunden gebucht.",
+                                         "Booked to the customer only."))
                     else:
                         projekt_live_name = st.text_input(projekt_label(), key="live_projekt")
                 if st.button(t("▶️ ARBEIT STARTEN", "▶️ START WORK"), key="btn_kommen",
@@ -3203,9 +3210,9 @@ if st.session_state.role == "Mitarbeiter":
                     if m_kunde_id == "__KEINER__": m_kunde_id = ""
                     popt = projekt_optionen_fuer_kunde(m_kunde_id)
                     projekt_widget_normalisieren("ma_projekt_id", popt)
-                    m_projekt_id = st.selectbox(t("Projekt", "Project"), popt,
+                    m_projekt_id = st.selectbox(t("Projekt (optional)", "Project (optional)"), popt,
                                                 index=vorauswahl_index(popt, letztes_projekt_m),
-                                                format_func=lambda x: t("Kein Projekt", "No project") if x == "__KEINER__" else projekt_label_id(x), key="ma_projekt_id")
+                                                format_func=lambda x: t("— ohne Projekt —", "— no project —") if x == "__KEINER__" else projekt_label_id(x), key="ma_projekt_id")
                     if m_projekt_id == "__KEINER__": m_projekt_id = ""
                     m_projekt_name = projekt_label_id(m_projekt_id) if m_projekt_id else ""
                 else:
@@ -3295,8 +3302,12 @@ if st.session_state.role == "Mitarbeiter":
                             f"Edit directly in the table (up to {limit_stunden:.0f} h back). "
                             "Hours are recalculated on save."))
 
-                    raster = bearbeitbar[["ID", "Datum", "Kommen", "Gehen", "Pause (Min)",
-                                          "Kategorie", "Projekt", "Notiz", "Netto (Std)"]].copy()
+                    # Ohne Projektfeld (z. B. Kita) bleibt die Spalte leer – dann weglassen
+                    _raster_spalten = ["ID", "Datum", "Kommen", "Gehen", "Pause (Min)", "Kategorie"]
+                    if B["projekt_aktiv"]:
+                        _raster_spalten.append("Projekt")
+                    _raster_spalten += ["Notiz", "Netto (Std)"]
+                    raster = bearbeitbar[_raster_spalten].copy()
                     for spalte in ("Kommen", "Gehen"):
                         raster[spalte] = raster[spalte].apply(
                             lambda w: parse_zeit(w).strftime(ZEITFORMAT) if parse_zeit(w) else "")
@@ -3305,8 +3316,9 @@ if st.session_state.role == "Mitarbeiter":
                         raster["Pause (Min)"], errors="coerce").fillna(0).astype(int)
                     raster["Netto (Std)"] = pd.to_numeric(raster["Netto (Std)"], errors="coerce").astype(float)
                     for spalte in ("Projekt", "Notiz", "Kategorie"):
-                        raster[spalte] = raster[spalte].astype(str).replace(
-                            {"nan": "", "<NA>": "", "None": ""})
+                        if spalte in raster.columns:
+                            raster[spalte] = raster[spalte].astype(str).replace(
+                                {"nan": "", "<NA>": "", "None": ""})
                     raster["Löschen"] = False
                     kategorie_optionen = list(dict.fromkeys(
                         kategorien() + [k for k in raster["Kategorie"].unique() if k]))
@@ -3315,7 +3327,8 @@ if st.session_state.role == "Mitarbeiter":
                     # die kurze Ansicht; die übrigen Felder lassen sich zuschalten.
                     alle_spalten = st.toggle(t("Alle Felder anzeigen", "Show all fields"),
                                              value=False, key="ma_spalten_voll")
-                    spalten_kurz = ["ID", "Datum", "Kommen", "Gehen", "Netto (Std)", "Löschen"]
+                    spalten_kurz = [sp for sp in ["ID", "Datum", "Kommen", "Gehen", "Netto (Std)", "Löschen"]
+                                    if sp in raster.columns]
                     raster_anzeige = raster if alle_spalten else raster[spalten_kurz]
 
                     bearbeitet = st.data_editor(
@@ -3417,7 +3430,7 @@ if st.session_state.role == "Mitarbeiter":
                                             "Netto (Std)", "Kategorie", "Projekt", "Notiz", "Typ"]] = [
                                 neues_datum, kommen.strftime(ZEITFORMAT), gehen.strftime(ZEITFORMAT),
                                 brutto, pause, netto, zeile["Kategorie"],
-                                str(zeile["Projekt"] or "").strip(), str(zeile["Notiz"] or "").strip(),
+                                str(zeile.get("Projekt") or "").strip(), str(zeile.get("Notiz") or "").strip(),
                                 "Korrigiert"]
                             geaendert += 1
 
@@ -3733,18 +3746,35 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
             st.session_state.pop("_zeit_kollisionsmeldung", None)
             st.rerun()
 
-    tab_meine_zeit, tab_zeiten, tab_auswertung, tab_antraege, tab_stamm, tab_kunden, tab_projekte, tab_konten, tab_einst, tab_hilfe = st.tabs([
-        t("🕒 Meine Arbeitszeit", "🕒 My working time"),
-        t("📊 Zeiten & Export", "📊 Times & export"),
-        t("📈 Auswertung", "📈 Analysis"),
-        t("🌴 Anträge", "🌴 Requests"),
-        t("👥 Stammdaten", "👥 Employees"),
-        t("👤 Kunden", "👤 Customers"),
-        t("📁 Projekte", "📁 Projects"),
-        t("🔐 Benutzerkonten", "🔐 User accounts"),
-        t("⚙️ Einstellungen", "⚙️ Settings"),
-        t("❓ Hilfe", "❓ Help"),
-    ])
+    # Reiter richten sich nach der Branche: Eine Kita braucht weder Kunden noch
+    # Projekte noch deren Auswertung. Leere Reiter mit Hinweistext wirken wie
+    # fehlende Berechtigungen – besser gar nicht erst anzeigen.
+    mit_kunden_projekten = kunden_projekte_aktiv()
+    reiter_plan = [("meine_zeit", t("🕒 Meine Arbeitszeit", "🕒 My working time")),
+                   ("zeiten", t("📊 Zeiten & Export", "📊 Times & export"))]
+    if mit_kunden_projekten:
+        reiter_plan.append(("auswertung", t("📈 Auswertung", "📈 Analysis")))
+    reiter_plan += [("antraege", t("🌴 Anträge", "🌴 Requests")),
+                    ("stamm", t("👥 Stammdaten", "👥 Employees"))]
+    if mit_kunden_projekten:
+        reiter_plan += [("kunden", t("👤 Kunden", "👤 Customers")),
+                        ("projekte", t("📁 Projekte", "📁 Projects"))]
+    reiter_plan += [("konten", t("🔐 Benutzerkonten", "🔐 User accounts")),
+                    ("einst", t("⚙️ Einstellungen", "⚙️ Settings")),
+                    ("hilfe", t("❓ Hilfe", "❓ Help"))]
+
+    _tabs = st.tabs([beschriftung for _, beschriftung in reiter_plan])
+    reiter = {name: tab for (name, _), tab in zip(reiter_plan, _tabs)}
+    tab_meine_zeit = reiter["meine_zeit"]
+    tab_zeiten = reiter["zeiten"]
+    tab_antraege = reiter["antraege"]
+    tab_stamm = reiter["stamm"]
+    tab_konten = reiter["konten"]
+    tab_einst = reiter["einst"]
+    tab_hilfe = reiter["hilfe"]
+    tab_auswertung = reiter.get("auswertung")
+    tab_kunden_verwaltung = reiter.get("kunden")
+    tab_projekte = reiter.get("projekte")
 
     # ---------------- Persönliche Zeiterfassung / Abwesenheiten ----------------
     with tab_meine_zeit:
@@ -3807,7 +3837,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                         if admin_kunde_id == "__KEINER__": admin_kunde_id = ""
                         popt = projekt_optionen_fuer_kunde(admin_kunde_id)
                         projekt_widget_normalisieren("admin_eigenes_projekt", popt)
-                        admin_projekt_id = s2.selectbox(t("Projekt", "Project"), popt, format_func=lambda x: t("Kein Projekt", "No project") if x == "__KEINER__" else projekt_label_id(x), disabled=not offen.empty, key="admin_eigenes_projekt")
+                        admin_projekt_id = s2.selectbox(t("Projekt (optional)", "Project (optional)"), popt, format_func=lambda x: t("— ohne Projekt —", "— no project —") if x == "__KEINER__" else projekt_label_id(x), disabled=not offen.empty, key="admin_eigenes_projekt")
                         if admin_projekt_id == "__KEINER__": admin_projekt_id = ""
                         projekt = projekt_label_id(admin_projekt_id) if admin_projekt_id else ""
                     else:
@@ -3868,7 +3898,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                             if admin_nach_kunde_id == "__KEINER__": admin_nach_kunde_id = ""
                             popt = projekt_optionen_fuer_kunde(admin_nach_kunde_id)
                             projekt_widget_normalisieren("admin_nach_projekt", popt)
-                            admin_nach_projekt_id = st.selectbox(t("Projekt", "Project"), popt, format_func=lambda x: t("Kein Projekt", "No project") if x == "__KEINER__" else projekt_label_id(x), key="admin_nach_projekt")
+                            admin_nach_projekt_id = st.selectbox(t("Projekt (optional)", "Project (optional)"), popt, format_func=lambda x: t("— ohne Projekt —", "— no project —") if x == "__KEINER__" else projekt_label_id(x), key="admin_nach_projekt")
                             if admin_nach_projekt_id == "__KEINER__": admin_nach_projekt_id = ""
                             m_projekt = projekt_label_id(admin_nach_projekt_id) if admin_nach_projekt_id else ""
                         else:
@@ -3996,7 +4026,15 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                 for c in ("Brutto (Std)", "Netto (Std)"):
                     edit[c] = pd.to_numeric(edit[c], errors="coerce")
                 edit["Löschen"] = False
-                edit = edit[["ID", "Mitarbeiter", "Datum", "Kommen", "Gehen", "Pause (Min)", "Kategorie", "Kunde-ID", "Projekt-ID", "Projekt", "Notiz", "Typ", "Status", "Netto (Std)", "Löschen"]]
+                # Ohne Kunden-/Projektmodul (z. B. Kita) bleiben diese Spalten leer –
+                # dann gar nicht erst anzeigen.
+                _spalten_edit = ["ID", "Mitarbeiter", "Datum", "Kommen", "Gehen", "Pause (Min)", "Kategorie"]
+                if mit_kunden_projekten:
+                    _spalten_edit += ["Kunde-ID", "Projekt-ID"]
+                if B["projekt_aktiv"]:
+                    _spalten_edit.append("Projekt")
+                _spalten_edit += ["Notiz", "Typ", "Status", "Netto (Std)", "Löschen"]
+                edit = edit[_spalten_edit]
                 # Auswahllisten einmal bilden statt je Spaltenkonfiguration erneut
                 _kdf = aktive_kunden_df()
                 _pdf = aktive_projekte_df()
@@ -4064,9 +4102,15 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                         # Durchgang sich nicht gegenseitig überlappen können
                         pruefbestaende[person] = [b for b in pruefbestaende[person] if b.id != str(row["ID"])]
                         pruefbestaende[person].append(Buchung(str(row["ID"]), datum, kommen, gehen))
+                        # Nicht angezeigte Spalten behalten ihren gespeicherten Wert
+                        _alt_zeile = logs.loc[mask].iloc[0]
                         logs.loc[mask, ["Mitarbeiter", "Datum", "Kommen", "Gehen", "Brutto (Std)", "Pause (Min)", "Netto (Std)", "Kategorie", "Kunde-ID", "Projekt-ID", "Projekt", "Notiz", "Typ", "Status"]] = [
                             str(row["Mitarbeiter"]), datum, kommen.strftime(ZEITFORMAT), gehen.strftime(ZEITFORMAT), brutto, pause, netto,
-                            str(row.get("Kategorie", "")), str(row.get("Kunde-ID", "") or ""), str(row.get("Projekt-ID", "") or ""), str(row.get("Projekt", "") or ""), str(row.get("Notiz", "") or ""), str(row.get("Typ", "Korrigiert") or "Korrigiert"), str(row.get("Status", "Erfasst"))
+                            str(row.get("Kategorie", "")),
+                            str(row.get("Kunde-ID", _alt_zeile.get("Kunde-ID", "")) or ""),
+                            str(row.get("Projekt-ID", _alt_zeile.get("Projekt-ID", "")) or ""),
+                            str(row.get("Projekt", _alt_zeile.get("Projekt", "")) or ""),
+                            str(row.get("Notiz", "") or ""), str(row.get("Typ", "Korrigiert") or "Korrigiert"), str(row.get("Status", "Erfasst"))
                         ]
                     if fehler:
                         # Bei Fehlern wird nichts gespeichert – sonst landet ein
@@ -4102,7 +4146,16 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                 k2.metric(t("Netto-Stunden gesamt", "Total net hours"), f"{netto_summe:.2f}")
                 k3.metric(t("Laufend", "Running"), int((gefiltert["Status"] == "Läuft").sum()))
 
-                tabelle(gefiltert)
+                # Interne IDs gehören nicht in eine Übersicht: Bei aktivem Modul
+                # werden Kunde und Projekt als Klarnamen gezeigt, sonst entfallen
+                # die Spalten ganz.
+                if mit_kunden_projekten:
+                    anzeige_gefiltert = zeit_mit_kunden_projekten(gefiltert).drop(
+                        columns=["Kunde-ID", "Projekt-ID"], errors="ignore")
+                else:
+                    anzeige_gefiltert = gefiltert.drop(
+                        columns=["Kunde-ID", "Projekt-ID"], errors="ignore")
+                tabelle(anzeige_gefiltert)
 
                 st.markdown(f"##### {t('Auswertung je Mitarbeiter', 'Per-employee summary')}")
                 auswertung = []
@@ -4290,7 +4343,8 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                             st.rerun()
 
     # ---------------- Auswertung ----------------
-    with tab_auswertung:
+    if tab_auswertung is not None:
+      with tab_auswertung:
         if not kunden_projekte_aktiv():
             st.info(t("Die Kunden-/Projekt-Auswertung ist für Handwerk/Bau und Dienstleistung/Beratung vorgesehen. Wählen Sie diese Branche unter Einstellungen, um sie zu aktivieren.", "Customer/project analysis is intended for trades/construction and services/consulting. Select one of these industries under Settings to activate it."))
         else:
@@ -5006,7 +5060,8 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                     st.rerun()
 
     # ---------------- Kunden ----------------
-    with tab_kunden:
+    if tab_kunden_verwaltung is not None:
+      with tab_kunden_verwaltung:
         if not kunden_projekte_aktiv():
             st.info(t("Das Kundenmodul wird für Handwerk/Bau und Dienstleistung/Beratung angezeigt.", "The customer module is shown for trades/construction and services/consulting."))
         else:
@@ -5045,7 +5100,8 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                         st.session_state.kunden = edited_k.drop(columns=["Löschen"]).reset_index(drop=True); speichern("kunden"); st.rerun()
 
     # ---------------- Projekte ----------------
-    with tab_projekte:
+    if tab_projekte is not None:
+      with tab_projekte:
         if not kunden_projekte_aktiv():
             st.info(t("Das Projektmodul wird für Handwerk/Bau und Dienstleistung/Beratung angezeigt.", "The project module is shown for trades/construction and services/consulting."))
         else:
