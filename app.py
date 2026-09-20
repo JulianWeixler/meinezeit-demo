@@ -1726,18 +1726,30 @@ def kunden_projekte_aktiv() -> bool:
     return cfg("branche") in {"Handwerk / Bau", "Dienstleistung / Beratung"}
 
 
+def ist_aktiv_wert(wert) -> bool:
+    """Robuste Auswertung von Aktiv-Werten, auch bei pd.NA/None/Strings."""
+    if wert is None or pd.isna(wert):
+        return False
+    if isinstance(wert, str):
+        return wert.strip().casefold() in {"1", "true", "ja", "yes", "aktiv", "active"}
+    try:
+        return bool(wert)
+    except (TypeError, ValueError):
+        return False
+
+
 def aktive_kunden_df() -> pd.DataFrame:
     df = st.session_state.get("kunden", pd.DataFrame(columns=SPALTEN_KUNDEN))
     if df.empty:
         return df
-    return df[df["Aktiv"].apply(lambda x: bool(x))].copy()
+    return df[df["Aktiv"].apply(ist_aktiv_wert)].copy()
 
 
 def aktive_projekte_df(kunden_id: str | None = None) -> pd.DataFrame:
     df = st.session_state.get("projekte", pd.DataFrame(columns=SPALTEN_PROJEKTE))
     if df.empty:
         return df
-    df = df[df["Aktiv"].apply(lambda x: bool(x))].copy()
+    df = df[df["Aktiv"].apply(ist_aktiv_wert)].copy()
     if kunden_id and kunden_id != "__ALLE__":
         df = df[df["Kunden-ID"].astype(str) == str(kunden_id)]
     return df
@@ -2951,8 +2963,8 @@ def letzte_buchung_kunde_projekt(name: str) -> tuple:
         return "", ""
     eigene = eigene.sort_values("Datum")
     letzte = eigene.iloc[-1]
-    kunde = str(letzte.get("Kunde-ID") or "").strip()
-    projekt = str(letzte.get("Projekt-ID") or "").strip()
+    kunde = sicherer_text(letzte.get("Kunde-ID"))
+    projekt = sicherer_text(letzte.get("Projekt-ID"))
     return ("" if kunde in ("nan", "None") else kunde,
             "" if projekt in ("nan", "None") else projekt)
 
@@ -3625,7 +3637,7 @@ if st.session_state.role == "Mitarbeiter":
             if not offene.empty:
                 st.caption(t("Ankreuzen und zurückziehen.", "Tick and withdraw."))
                 antrag_raster = offene[["ID", "Startdatum", "Enddatum", "Einheit",
-                                        "Tage", "Stunden", "Art"]].copy()
+                                        "Tage", "Stunden", "Art", "Status"]].copy()
                 for spalte in ("Startdatum", "Enddatum"):
                     antrag_raster[spalte] = pd.to_datetime(antrag_raster[spalte], errors="coerce")
                 antrag_raster["Zurückziehen"] = False
@@ -3642,6 +3654,7 @@ if st.session_state.role == "Mitarbeiter":
                         "Tage": st.column_config.NumberColumn(spalten_label("Tage"), disabled=True, format="%d"),
                         "Stunden": st.column_config.NumberColumn(spalten_label("Stunden"), disabled=True, format="%.1f"),
                         "Art": st.column_config.TextColumn(spalten_label("Art"), disabled=True),
+                        "Status": st.column_config.TextColumn(t("Status", "Status"), disabled=True),
                         "Zurückziehen": st.column_config.CheckboxColumn(t("Zurückziehen", "Withdraw")),
                     })
                 if st.button(t("↩️ Ausgewählte zurückziehen", "↩️ Withdraw selected"),
@@ -3852,7 +3865,8 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                    ("antraege", t("🌴 Anträge", "🌴 Requests"))]
     if mit_kunden_projekten:
         reiter_plan += [("kunden", t("👤 Kunden", "👤 Customers")),
-                        ("projekte", t("📁 Projekte", "📁 Projects"))]
+                        ("projekte", t("📁 Projekte", "📁 Projects")),
+                        ("auswertung", t("📈 Auswertung", "📈 Analysis"))]
     reiter_plan += [("stamm", t("👥 Stammdaten", "👥 Employees")),
                     ("konten", t("🔐 Benutzerkonten", "🔐 User accounts")),
                     ("einst", t("⚙️ Einstellungen", "⚙️ Settings")),
@@ -3867,8 +3881,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
     tab_konten = reiter["konten"]
     tab_einst = reiter["einst"]
     tab_hilfe = reiter["hilfe"]
-    # Die Auswertung bleibt funktional, erscheint aber innerhalb des Reiters „Zeiten“.
-    tab_auswertung = tab_zeiten
+    tab_auswertung = reiter.get("auswertung")
     tab_kunden_verwaltung = reiter.get("kunden")
     tab_projekte = reiter.get("projekte")
 
@@ -4482,9 +4495,6 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
     # ---------------- Auswertung ----------------
     if tab_auswertung is not None:
       with tab_auswertung:
-        if not kunden_projekte_aktiv():
-            st.info(t("Die Kunden-/Projekt-Auswertung ist für Handwerk/Bau und Dienstleistung/Beratung vorgesehen. Wählen Sie diese Branche unter Einstellungen, um sie zu aktivieren.", "Customer/project analysis is intended for trades/construction and services/consulting. Select one of these industries under Settings to activate it."))
-        else:
             st.markdown(f"### {t('Auswertung nach Kunde & Projekt', 'Customer & project analysis')}")
             heute_a = date.today()
             c1, c2 = st.columns(2)
@@ -5303,6 +5313,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                 email = c2.text_input(t("E-Mail", "Email"), key=f"neu_kunden_email_{_kunde_form_version}")
                 ort = c3.text_input(t("Ort", "City"), key=f"neu_kunden_ort_{_kunde_form_version}")
                 strasse = st.text_input(t("Straße", "Street"), key=f"neu_kunden_strasse_{_kunde_form_version}")
+                c_status = st.selectbox(t("Status", "Status"), [t("Aktiv", "Active"), t("Inaktiv", "Inactive")], key=f"neu_kunden_status_{_kunde_form_version}")
                 notiz = st.text_input(t("Notiz", "Note"), key=f"neu_kunden_notiz_{_kunde_form_version}")
                 if st.button(t("💾 Kunde anlegen", "💾 Add customer"), key="kunde_anlegen", type="primary"):
                     nr = knr.strip() or f"K-{len(st.session_state.kunden)+1:04d}"
@@ -5311,7 +5322,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                         st.error(t(f"Die Kundennummer „{nr}“ ist bereits vergeben. Bitte eine andere Kundennummer verwenden.",
                                     f"Customer number “{nr}” is already in use. Please use another customer number."))
                     else:
-                        st.session_state.kunden = zeile_anhaengen(st.session_state.kunden, {"Kunden-ID": neue_id(), "Kundennummer": nr, "Kunde": kn.strip(), "Ansprechpartner": ap.strip(), "Telefon": tel.strip(), "E-Mail": email.strip(), "Straße": strasse.strip(), "PLZ": "", "Ort": ort.strip(), "Aktiv": True, "Notiz": notiz.strip()})
+                        st.session_state.kunden = zeile_anhaengen(st.session_state.kunden, {"Kunden-ID": neue_id(), "Kundennummer": nr, "Kunde": kn.strip(), "Ansprechpartner": ap.strip(), "Telefon": tel.strip(), "E-Mail": email.strip(), "Straße": strasse.strip(), "PLZ": "", "Ort": ort.strip(), "Aktiv": c_status == t("Aktiv", "Active"), "Notiz": notiz.strip()})
                         speichern("kunden")
                         st.session_state["_kunde_form_version"] = _kunde_form_version + 1
                         melde(f"Kunde „{kn.strip()}“ angelegt.", "Customer created.", "👤"); st.rerun()
@@ -5319,7 +5330,9 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                 st.info(t("Noch keine Kunden angelegt.", "No customers yet."))
             else:
                 kunden_edit = st.session_state.kunden.copy(); kunden_edit["Löschen"] = False
-                edited_k = st.data_editor(kunden_edit, use_container_width=True, hide_index=True, num_rows="fixed", key="kunden_editor", column_config={"Kunden-ID": st.column_config.TextColumn("ID", disabled=True) if interne_ids_sichtbar() else None, "Aktiv": st.column_config.CheckboxColumn("Aktiv"), "Löschen": st.column_config.CheckboxColumn("Löschen")})
+                kunden_edit["Status"] = kunden_edit["Aktiv"].apply(lambda x: t("Aktiv", "Active") if ist_aktiv_wert(x) else t("Inaktiv", "Inactive"))
+                edited_k = st.data_editor(kunden_edit, use_container_width=True, hide_index=True, num_rows="fixed", key="kunden_editor", column_config={"Kunden-ID": st.column_config.TextColumn("ID", disabled=True) if interne_ids_sichtbar() else None, "Aktiv": None, "Status": st.column_config.SelectboxColumn(t("Status", "Status"), options=[t("Aktiv", "Active"), t("Inaktiv", "Inactive")]), "Löschen": st.column_config.CheckboxColumn("Löschen")})
+                edited_k["Aktiv"] = edited_k["Status"].eq(t("Aktiv", "Active"))
                 if st.button(t("💾 Kundenänderungen speichern", "💾 Save customer changes"), key="kunden_speichern", type="primary"):
                     doppelte_k = doppelte_nummern(edited_k, "Kundennummer")
                     if doppelte_k:
@@ -5330,10 +5343,10 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                         linked = not st.session_state.projekte.empty and st.session_state.projekte["Kunden-ID"].astype(str).isin(ids).any()
                         if linked: st.error(t("Kunden mit verknüpften Projekten können nicht gelöscht werden. Setze sie auf Inaktiv.", "Customers with linked projects cannot be deleted. Set them inactive."))
                         else:
-                            edited_k = edited_k[~edited_k["Löschen"].fillna(False)].copy().drop(columns=["Löschen"])
+                            edited_k = edited_k[~edited_k["Löschen"].fillna(False)].copy().drop(columns=["Löschen", "Status"], errors="ignore")
                             st.session_state.kunden = edited_k.reset_index(drop=True); speichern("kunden"); st.rerun()
                     else:
-                        st.session_state.kunden = edited_k.drop(columns=["Löschen"]).reset_index(drop=True); speichern("kunden"); st.rerun()
+                        st.session_state.kunden = edited_k.drop(columns=["Löschen", "Status"], errors="ignore").reset_index(drop=True); speichern("kunden"); st.rerun()
 
     # ---------------- Projekte ----------------
     if tab_projekte is not None:
@@ -5354,6 +5367,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                 start = c2.date_input(t("Startdatum", "Start date"), date.today(), format=DATUMSFORMAT_UI, key=f"neu_projektstart_{_projekt_form_version}")
                 ende = c3.date_input(t("Enddatum", "End date"), None, format=DATUMSFORMAT_UI, key=f"neu_projektende_{_projekt_form_version}")
                 satz = st.number_input(t("Stundensatz (optional)", "Hourly rate (optional)"), min_value=0.0, step=5.0, key=f"neu_projektsatz_{_projekt_form_version}")
+                p_aktivstatus = st.selectbox(t("Aktivstatus", "Active status"), [t("Aktiv", "Active"), t("Inaktiv", "Inactive")], key=f"neu_projekt_aktivstatus_{_projekt_form_version}")
                 pnotiz = st.text_input(t("Notiz", "Note"), key=f"neu_projektnotiz_{_projekt_form_version}")
                 if st.button(t("💾 Projekt anlegen", "💾 Add project"), key="projekt_anlegen", type="primary"):
                     nr = pnr.strip() or f"P-{len(st.session_state.projekte)+1:04d}"
@@ -5364,7 +5378,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                         st.error(t(f"Die Projektnummer „{nr}“ ist bereits vergeben. Bitte eine andere Projektnummer verwenden.",
                                     f"Project number “{nr}” is already in use. Please use another project number."))
                     else:
-                        st.session_state.projekte = zeile_anhaengen(st.session_state.projekte, {"Projekt-ID": neue_id(), "Projektnummer": nr, "Projekt": pname.strip(), "Kunden-ID": pkunde, "Status": status, "Startdatum": start, "Enddatum": ende, "Stundensatz": float(satz), "Aktiv": True, "Notiz": pnotiz.strip()})
+                        st.session_state.projekte = zeile_anhaengen(st.session_state.projekte, {"Projekt-ID": neue_id(), "Projektnummer": nr, "Projekt": pname.strip(), "Kunden-ID": pkunde, "Status": status, "Startdatum": start, "Enddatum": ende, "Stundensatz": float(satz), "Aktiv": p_aktivstatus == t("Aktiv", "Active"), "Notiz": pnotiz.strip()})
                         speichern("projekte")
                         st.session_state["_projekt_form_version"] = _projekt_form_version + 1
                         melde(f"Projekt „{pname.strip()}“ angelegt.", "Project created.", "📁"); st.rerun()
@@ -5372,12 +5386,13 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                 st.info(t("Noch keine Projekte angelegt.", "No projects yet."))
             else:
                 proj_edit = st.session_state.projekte.copy(); proj_edit["Löschen"] = False
+                proj_edit["Aktivstatus"] = proj_edit["Aktiv"].apply(lambda x: t("Aktiv", "Active") if ist_aktiv_wert(x) else t("Inaktiv", "Inactive"))
                 _pk = aktive_kunden_df()
                 _proj_kunden_ids = _pk["Kunden-ID"].astype(str).tolist() if not _pk.empty else []
                 _kunden_label_zu_id_projekt = {kunden_label(_kid): _kid for _kid in _proj_kunden_ids}
                 proj_edit["Kunde"] = proj_edit["Kunden-ID"].apply(
                     lambda _kid: kunden_label(sicherer_text(_kid)) if sicherer_text(_kid) else "")
-                _proj_spalten = [c for c in ["Projekt-ID", "Projektnummer", "Projekt", "Kunden-ID", "Kunde", "Status", "Startdatum", "Enddatum", "Stundensatz", "Aktiv", "Notiz", "Löschen"] if c in proj_edit.columns]
+                _proj_spalten = [c for c in ["Projekt-ID", "Projektnummer", "Projekt", "Kunden-ID", "Kunde", "Status", "Startdatum", "Enddatum", "Stundensatz", "Aktiv", "Aktivstatus", "Notiz", "Löschen"] if c in proj_edit.columns]
                 proj_edit = proj_edit[_proj_spalten]
                 edited_p = st.data_editor(
                     proj_edit, use_container_width=True, hide_index=True, num_rows="fixed", key="projekte_editor",
@@ -5388,17 +5403,19 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                         "Startdatum": st.column_config.DateColumn(t("Startdatum", "Start date"), format=DATUMSFORMAT_UI),
                         "Enddatum": st.column_config.DateColumn(t("Enddatum", "End date"), format=DATUMSFORMAT_UI),
                         "Stundensatz": st.column_config.NumberColumn(t("Stundensatz", "Hourly rate"), min_value=0.0, step=5.0, format="%.2f"),
-                        "Aktiv": st.column_config.CheckboxColumn(t("Aktiv", "Active")),
+                        "Aktiv": None,
+                        "Aktivstatus": st.column_config.SelectboxColumn(t("Aktivstatus", "Active status"), options=[t("Aktiv", "Active"), t("Inaktiv", "Inactive")]),
                         "Löschen": st.column_config.CheckboxColumn(t("Löschen", "Delete")),
                     })
                 edited_p["Kunden-ID"] = edited_p["Kunde"].map(_kunden_label_zu_id_projekt).fillna(edited_p["Kunden-ID"])
+                edited_p["Aktiv"] = edited_p["Aktivstatus"].eq(t("Aktiv", "Active"))
                 if st.button(t("💾 Projektänderungen speichern", "💾 Save project changes"), key="projekte_speichern", type="primary"):
                     doppelte_p = doppelte_nummern(edited_p, "Projektnummer")
                     if doppelte_p:
                         st.error(t(f"Projektnummern dürfen nicht doppelt vergeben werden: {', '.join(doppelte_p)}",
                                    f"Project numbers must be unique: {', '.join(doppelte_p)}"))
                     else:
-                        st.session_state.projekte = edited_p.drop(columns=["Löschen", "Kunde"], errors="ignore").reset_index(drop=True); speichern("projekte"); st.rerun()
+                        st.session_state.projekte = edited_p.drop(columns=["Löschen", "Kunde", "Aktivstatus"], errors="ignore").reset_index(drop=True); speichern("projekte"); st.rerun()
 
     # ---------------- Benutzerkonten ----------------
     with tab_konten:
