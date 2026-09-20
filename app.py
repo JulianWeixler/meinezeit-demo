@@ -4449,7 +4449,94 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                         by_ma.to_excel(writer, index=False, sheet_name="Mitarbeiter")
                         by_ma_proj.to_excel(writer, index=False, sheet_name="Mitarbeiter_Projekt")
                         matrix.to_excel(writer, index=False, sheet_name="Matrix")
-                    st.download_button(t("📥 Auswertung als Excel", "📥 Export analysis to Excel"), data=puffer_a.getvalue(), file_name=f"Auswertung_{avon:%Y%m%d}_{abis:%Y%m%d}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+                    # Drei Ausgabewege: Excel für die manuelle Weiterverarbeitung,
+                    # CSV für Import-/Buchhaltungssysteme und ein API-kompatibles
+                    # JSON-Format als stabile Grundlage für eine spätere REST-API.
+                    st.markdown(f"#### {t('Export & Schnittstelle', 'Export & interface')}")
+                    ex1, ex2, ex3 = st.columns(3)
+                    with ex1:
+                        st.download_button(
+                            t("📥 Excel", "📥 Excel"),
+                            data=puffer_a.getvalue(),
+                            file_name=f"Auswertung_{avon:%Y%m%d}_{abis:%Y%m%d}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            use_container_width=True,
+                            key="auswertung_excel_download",
+                        )
+
+                    # Semikolon + UTF-8-SIG ist für deutsche Excel-/ERP-Importe
+                    # besonders praktisch (Umlaute und Dezimalwerte bleiben sauber).
+                    csv_a = export_a.to_csv(index=False, sep=";", encoding="utf-8-sig").encode("utf-8-sig")
+                    with ex2:
+                        st.download_button(
+                            t("📄 CSV", "📄 CSV"),
+                            data=csv_a,
+                            file_name=f"Auswertung_{avon:%Y%m%d}_{abis:%Y%m%d}.csv",
+                            mime="text/csv",
+                            use_container_width=True,
+                            key="auswertung_csv_download",
+                        )
+
+                    # API-neutrales Austauschformat. Die Feldnamen sind bewusst
+                    # maschinenlesbar und enthalten zusätzlich IDs, damit eine
+                    # spätere FastAPI-Schnittstelle dieselbe Struktur liefern kann.
+                    api_spalten = [c for c in [
+                        "ID", "Mitarbeiter", "Datum", "Kommen", "Gehen",
+                        "Pause (Min)", "Netto (Std)", "Kunde-ID", "Kunde",
+                        "Projekt-ID", "Projekt", "Kategorie", "Notiz", "Status"
+                    ] if c in df_a.columns]
+                    api_df = df_a[api_spalten].copy()
+                    for col in api_df.columns:
+                        if col in DATUMSSPALTEN or col == "Datum":
+                            api_df[col] = api_df[col].apply(
+                                lambda v: v.isoformat() if hasattr(v, "isoformat") else ("" if pd.isna(v) else str(v))
+                            )
+                        elif pd.api.types.is_datetime64_any_dtype(api_df[col]):
+                            api_df[col] = api_df[col].dt.strftime("%Y-%m-%dT%H:%M:%S").fillna("")
+                    api_df = api_df.where(pd.notna(api_df), None)
+                    api_payload = {
+                        "api_version": "v1",
+                        "von": avon.isoformat(),
+                        "bis": abis.isoformat(),
+                        "filter": {
+                            "kunde_id": None if aus_kunde == "__ALLE__" else aus_kunde,
+                            "projekt_id": None if aus_projekt == "__ALLE__" else aus_projekt,
+                            "mitarbeiter": None if aus_ma == "__ALLE__" else aus_ma,
+                        },
+                        "anzahl": int(len(api_df)),
+                        "gesamtstunden": round(float(stunden_a.sum()), 2),
+                        "daten": api_df.to_dict(orient="records"),
+                    }
+                    import json as _json
+                    api_json = _json.dumps(api_payload, ensure_ascii=False, indent=2, default=str).encode("utf-8")
+                    with ex3:
+                        st.download_button(
+                            t("🔗 API / JSON", "🔗 API / JSON"),
+                            data=api_json,
+                            file_name=f"api_zeiten_{avon:%Y%m%d}_{abis:%Y%m%d}.json",
+                            mime="application/json",
+                            use_container_width=True,
+                            key="auswertung_api_json_download",
+                        )
+
+                    with st.expander(t("🔗 API-Schnittstelle", "🔗 API interface")):
+                        st.info(t(
+                            "Der JSON-Export verwendet bereits das Datenformat der geplanten API. "
+                            "Für eine echte automatische REST-Schnittstelle wird später ein separater, "
+                            "abgesicherter API-Dienst (z. B. FastAPI) vor die Produktivdatenbank gesetzt. "
+                            "Dadurch muss die Streamlit-Oberfläche nicht als API-Server verwendet werden.",
+                            "The JSON export already uses the planned API data format. A separate secured "
+                            "API service (for example FastAPI) can later expose the production database "
+                            "without using the Streamlit UI as the API server."
+                        ))
+                        st.code(
+                            "GET /api/v1/zeiten?von=YYYY-MM-DD&bis=YYYY-MM-DD&kunde_id=...&projekt_id=...",
+                            language="text",
+                        )
+                        st.caption(t(
+                            "Vorgesehen: Authentifizierung per API-Key, Mandantentrennung und dieselben Filter wie oben.",
+                            "Planned: API-key authentication, tenant isolation and the same filters as above."
+                        ))
 
     # ---------------- Anträge ----------------
     with tab_antraege:
@@ -5095,6 +5182,11 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
             st.info(t("Das Kundenmodul wird für Handwerk/Bau und Dienstleistung/Beratung angezeigt.", "The customer module is shown for trades/construction and services/consulting."))
         else:
             st.markdown(f"### {t('Kundenverwaltung', 'Customer management')}")
+            # Widget-Werte muessen VOR dem Erzeugen der Widgets geloescht werden.
+            # Deshalb wird nach erfolgreicher Anlage nur ein Reset-Flag gesetzt und neu geladen.
+            if st.session_state.pop("_reset_neuer_kunde", False):
+                for _key in ("neu_kundennr", "neu_kunde", "neu_kunden_ap", "neu_kunden_tel", "neu_kunden_email", "neu_kunden_ort", "neu_kunden_strasse", "neu_kunden_notiz"):
+                    st.session_state.pop(_key, None)
             with st.expander(t("➕ Neuen Kunden anlegen", "➕ Add customer"), expanded=False):
                 c1,c2,c3 = st.columns(3)
                 knr = c1.text_input(t("Kundennummer", "Customer no."), key="neu_kundennr")
@@ -5115,8 +5207,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                     else:
                         st.session_state.kunden = zeile_anhaengen(st.session_state.kunden, {"Kunden-ID": neue_id(), "Kundennummer": nr, "Kunde": kn.strip(), "Ansprechpartner": ap.strip(), "Telefon": tel.strip(), "E-Mail": email.strip(), "Straße": strasse.strip(), "PLZ": "", "Ort": ort.strip(), "Aktiv": True, "Notiz": notiz.strip()})
                         speichern("kunden")
-                        for _key in ("neu_kundennr", "neu_kunde", "neu_kunden_ap", "neu_kunden_tel", "neu_kunden_email", "neu_kunden_ort", "neu_kunden_strasse", "neu_kunden_notiz"):
-                            st.session_state.pop(_key, None)
+                        st.session_state["_reset_neuer_kunde"] = True
                         melde(f"Kunde „{kn.strip()}“ angelegt.", "Customer created.", "👤"); st.rerun()
             if st.session_state.kunden.empty:
                 st.info(t("Noch keine Kunden angelegt.", "No customers yet."))
@@ -5145,6 +5236,9 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
             st.info(t("Das Projektmodul wird für Handwerk/Bau und Dienstleistung/Beratung angezeigt.", "The project module is shown for trades/construction and services/consulting."))
         else:
             st.markdown(f"### {t('Projektverwaltung', 'Project management')}")
+            if st.session_state.pop("_reset_neues_projekt", False):
+                for _key in ("neu_projektnr", "neu_projektname", "neu_projektkunde", "neu_projektstatus", "neu_projektstart", "neu_projektende", "neu_projektsatz", "neu_projektnotiz"):
+                    st.session_state.pop(_key, None)
             with st.expander(t("➕ Neues Projekt anlegen", "➕ Add project"), expanded=False):
                 c1,c2,c3 = st.columns(3)
                 pnr = c1.text_input(t("Projektnummer", "Project no."), key="neu_projektnr")
@@ -5168,8 +5262,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                     else:
                         st.session_state.projekte = zeile_anhaengen(st.session_state.projekte, {"Projekt-ID": neue_id(), "Projektnummer": nr, "Projekt": pname.strip(), "Kunden-ID": pkunde, "Status": status, "Startdatum": start, "Enddatum": ende, "Stundensatz": float(satz), "Aktiv": True, "Notiz": pnotiz.strip()})
                         speichern("projekte")
-                        for _key in ("neu_projektnr", "neu_projektname", "neu_projektkunde", "neu_projektstatus", "neu_projektstart", "neu_projektende", "neu_projektsatz", "neu_projektnotiz"):
-                            st.session_state.pop(_key, None)
+                        st.session_state["_reset_neues_projekt"] = True
                         melde(f"Projekt „{pname.strip()}“ angelegt.", "Project created.", "📁"); st.rerun()
             if st.session_state.projekte.empty:
                 st.info(t("Noch keine Projekte angelegt.", "No projects yet."))
