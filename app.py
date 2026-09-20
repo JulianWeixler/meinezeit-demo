@@ -5182,22 +5182,20 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
             st.info(t("Das Kundenmodul wird für Handwerk/Bau und Dienstleistung/Beratung angezeigt.", "The customer module is shown for trades/construction and services/consulting."))
         else:
             st.markdown(f"### {t('Kundenverwaltung', 'Customer management')}")
-            # Widget-Werte muessen VOR dem Erzeugen der Widgets geloescht werden.
-            # Deshalb wird nach erfolgreicher Anlage nur ein Reset-Flag gesetzt und neu geladen.
-            if st.session_state.pop("_reset_neuer_kunde", False):
-                for _key in ("neu_kundennr", "neu_kunde", "neu_kunden_ap", "neu_kunden_tel", "neu_kunden_email", "neu_kunden_ort", "neu_kunden_strasse", "neu_kunden_notiz"):
-                    st.session_state.pop(_key, None)
+            # Robuster Formular-Reset: Nach erfolgreicher Anlage wird die Widget-Version erhöht.
+            # Dadurch erzeugt Streamlit beim nächsten Lauf neue Widgets mit leeren Standardwerten.
+            _kunde_form_version = int(st.session_state.get("_kunde_form_version", 0))
             with st.expander(t("➕ Neuen Kunden anlegen", "➕ Add customer"), expanded=False):
                 c1,c2,c3 = st.columns(3)
-                knr = c1.text_input(t("Kundennummer", "Customer no."), key="neu_kundennr")
-                kn = c2.text_input(t("Kunde / Firma", "Customer / company"), key="neu_kunde")
-                ap = c3.text_input(t("Ansprechpartner", "Contact person"), key="neu_kunden_ap")
+                knr = c1.text_input(t("Kundennummer", "Customer no."), key=f"neu_kundennr_{_kunde_form_version}")
+                kn = c2.text_input(t("Kunde / Firma", "Customer / company"), key=f"neu_kunde_{_kunde_form_version}")
+                ap = c3.text_input(t("Ansprechpartner", "Contact person"), key=f"neu_kunden_ap_{_kunde_form_version}")
                 c1,c2,c3 = st.columns(3)
-                tel = c1.text_input(t("Telefon", "Phone"), key="neu_kunden_tel")
-                email = c2.text_input(t("E-Mail", "Email"), key="neu_kunden_email")
-                ort = c3.text_input(t("Ort", "City"), key="neu_kunden_ort")
-                strasse = st.text_input(t("Straße", "Street"), key="neu_kunden_strasse")
-                notiz = st.text_input(t("Notiz", "Note"), key="neu_kunden_notiz")
+                tel = c1.text_input(t("Telefon", "Phone"), key=f"neu_kunden_tel_{_kunde_form_version}")
+                email = c2.text_input(t("E-Mail", "Email"), key=f"neu_kunden_email_{_kunde_form_version}")
+                ort = c3.text_input(t("Ort", "City"), key=f"neu_kunden_ort_{_kunde_form_version}")
+                strasse = st.text_input(t("Straße", "Street"), key=f"neu_kunden_strasse_{_kunde_form_version}")
+                notiz = st.text_input(t("Notiz", "Note"), key=f"neu_kunden_notiz_{_kunde_form_version}")
                 if st.button(t("💾 Kunde anlegen", "💾 Add customer"), key="kunde_anlegen", type="primary"):
                     nr = knr.strip() or f"K-{len(st.session_state.kunden)+1:04d}"
                     if not kn.strip(): st.error(t("Bitte einen Kundennamen eingeben.", "Please enter a customer name."))
@@ -5207,7 +5205,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                     else:
                         st.session_state.kunden = zeile_anhaengen(st.session_state.kunden, {"Kunden-ID": neue_id(), "Kundennummer": nr, "Kunde": kn.strip(), "Ansprechpartner": ap.strip(), "Telefon": tel.strip(), "E-Mail": email.strip(), "Straße": strasse.strip(), "PLZ": "", "Ort": ort.strip(), "Aktiv": True, "Notiz": notiz.strip()})
                         speichern("kunden")
-                        st.session_state["_reset_neuer_kunde"] = True
+                        st.session_state["_kunde_form_version"] = _kunde_form_version + 1
                         melde(f"Kunde „{kn.strip()}“ angelegt.", "Customer created.", "👤"); st.rerun()
             if st.session_state.kunden.empty:
                 st.info(t("Noch keine Kunden angelegt.", "No customers yet."))
@@ -5236,21 +5234,19 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
             st.info(t("Das Projektmodul wird für Handwerk/Bau und Dienstleistung/Beratung angezeigt.", "The project module is shown for trades/construction and services/consulting."))
         else:
             st.markdown(f"### {t('Projektverwaltung', 'Project management')}")
-            if st.session_state.pop("_reset_neues_projekt", False):
-                for _key in ("neu_projektnr", "neu_projektname", "neu_projektkunde", "neu_projektstatus", "neu_projektstart", "neu_projektende", "neu_projektsatz", "neu_projektnotiz"):
-                    st.session_state.pop(_key, None)
+            _projekt_form_version = int(st.session_state.get("_projekt_form_version", 0))
             with st.expander(t("➕ Neues Projekt anlegen", "➕ Add project"), expanded=False):
                 c1,c2,c3 = st.columns(3)
-                pnr = c1.text_input(t("Projektnummer", "Project no."), key="neu_projektnr")
-                pname = c2.text_input(t("Projektname", "Project name"), key="neu_projektname")
+                pnr = c1.text_input(t("Projektnummer", "Project no."), key=f"neu_projektnr_{_projekt_form_version}")
+                pname = c2.text_input(t("Projektname", "Project name"), key=f"neu_projektname_{_projekt_form_version}")
                 kdf = aktive_kunden_df(); kop = kdf["Kunden-ID"].astype(str).tolist() if not kdf.empty else []
-                pkunde = c3.selectbox(t("Kunde", "Customer"), ["__KEINER__"] + kop, format_func=lambda x: t("Kein Kunde", "No customer") if x == "__KEINER__" else kunden_label(x), key="neu_projektkunde")
+                pkunde = c3.selectbox(t("Kunde", "Customer"), ["__KEINER__"] + kop, format_func=lambda x: t("Kein Kunde", "No customer") if x == "__KEINER__" else kunden_label(x), key=f"neu_projektkunde_{_projekt_form_version}")
                 c1,c2,c3 = st.columns(3)
-                status = c1.selectbox(t("Status", "Status"), ["Offen", "Laufend", "Abgeschlossen", "Pausiert"], key="neu_projektstatus")
-                start = c2.date_input(t("Startdatum", "Start date"), date.today(), format=DATUMSFORMAT_UI, key="neu_projektstart")
-                ende = c3.date_input(t("Enddatum", "End date"), None, format=DATUMSFORMAT_UI, key="neu_projektende")
-                satz = st.number_input(t("Stundensatz (optional)", "Hourly rate (optional)"), min_value=0.0, step=5.0, key="neu_projektsatz")
-                pnotiz = st.text_input(t("Notiz", "Note"), key="neu_projektnotiz")
+                status = c1.selectbox(t("Status", "Status"), ["Offen", "Laufend", "Abgeschlossen", "Pausiert"], key=f"neu_projektstatus_{_projekt_form_version}")
+                start = c2.date_input(t("Startdatum", "Start date"), date.today(), format=DATUMSFORMAT_UI, key=f"neu_projektstart_{_projekt_form_version}")
+                ende = c3.date_input(t("Enddatum", "End date"), None, format=DATUMSFORMAT_UI, key=f"neu_projektende_{_projekt_form_version}")
+                satz = st.number_input(t("Stundensatz (optional)", "Hourly rate (optional)"), min_value=0.0, step=5.0, key=f"neu_projektsatz_{_projekt_form_version}")
+                pnotiz = st.text_input(t("Notiz", "Note"), key=f"neu_projektnotiz_{_projekt_form_version}")
                 if st.button(t("💾 Projekt anlegen", "💾 Add project"), key="projekt_anlegen", type="primary"):
                     nr = pnr.strip() or f"P-{len(st.session_state.projekte)+1:04d}"
                     if not pname.strip(): st.error(t("Bitte einen Projektnamen eingeben.", "Please enter a project name."))
@@ -5262,7 +5258,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                     else:
                         st.session_state.projekte = zeile_anhaengen(st.session_state.projekte, {"Projekt-ID": neue_id(), "Projektnummer": nr, "Projekt": pname.strip(), "Kunden-ID": pkunde, "Status": status, "Startdatum": start, "Enddatum": ende, "Stundensatz": float(satz), "Aktiv": True, "Notiz": pnotiz.strip()})
                         speichern("projekte")
-                        st.session_state["_reset_neues_projekt"] = True
+                        st.session_state["_projekt_form_version"] = _projekt_form_version + 1
                         melde(f"Projekt „{pname.strip()}“ angelegt.", "Project created.", "📁"); st.rerun()
             if st.session_state.projekte.empty:
                 st.info(t("Noch keine Projekte angelegt.", "No projects yet."))
