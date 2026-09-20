@@ -391,7 +391,7 @@ def meldungen_anzeigen() -> None:
 # Warum SQLite: eine einzelne Datei, kein Serverbetrieb nötig – für Demos beim
 # Kunden reicht das, ist aber eine "echte" Datenbank statt loser CSV-Dateien.
 
-DB_DATEI = BASE_DIR / "zeiterfassung.db"
+DB_DATEI = APP_DIR / "zeiterfassung.db"
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 PRODUKTIONS_DB = bool(DATABASE_URL)
 
@@ -4880,7 +4880,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                     t("Branche für die Vorführung", "Industry for the presentation"),
                     list(BRANCHEN.keys()), format_func=branche_label, key="demo_branche")
                 demo_firma = d2.text_input(
-                    t("Firmenname", "Company name"),
+                    t("Name der Einrichtung", "Organization name"),
                     DEMO_FIRMENNAMEN[demo_branche], key="demo_firma")
 
                 # Der Zähler im Schlüssel setzt die Checkbox nach dem Laden zurück.
@@ -4902,7 +4902,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
         if systemadmin_vollzugriff:
             st.markdown(f"##### {t('Betrieb', 'Company')}")
             with st.container(border=True):
-                firmenname = st.text_input(t("Firmenname", "Company name"), cfg("firmenname"))
+                firmenname = st.text_input(t("Name der Einrichtung", "Organization name"), cfg("firmenname"))
                 branchen_liste = list(BRANCHEN.keys())
                 gewaehlte_branche = st.selectbox(t("Branche", "Industry"), branchen_liste,
                                                  index=branchen_liste.index(cfg("branche")),
@@ -4915,7 +4915,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                            f"{vorschau['projekt_label'][1] if ist_englisch() else vorschau['projekt_label'][0]}")
         else:
             st.markdown(f"##### {t('Betrieb', 'Company')}")
-            st.info(t(f"Betrieb: **{cfg('firmenname')}** · Branche: **{branche_label(cfg('branche'))}**. "
+            st.info(t(f"Einrichtung: **{cfg('firmenname')}** · Branche: **{branche_label(cfg('branche'))}**. "
                        "Firmenname und Branche werden ausschließlich vom Systemadmin festgelegt.",
                        f"Company: **{cfg('firmenname')}** · Industry: **{branche_label(cfg('branche'))}**. "
                        "Company name and industry are set exclusively by the system administrator."))
