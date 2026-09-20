@@ -3663,12 +3663,30 @@ if st.session_state.role == "Mitarbeiter":
                     if not ids:
                         st.info(t("Nichts ausgewählt.", "Nothing selected."))
                     else:
-                        st.session_state.vacation_requests = st.session_state.vacation_requests[
-                            ~st.session_state.vacation_requests["ID"].isin(ids)].reset_index(drop=True)
-                        speichern("vacation_requests")
-                        melde(f"{len(ids)} Antrag/Anträge zurückgezogen.",
-                              f"{len(ids)} request(s) withdrawn.", "↩️")
-                        st.rerun()
+                        # Sicherheitsprüfung direkt vor dem Löschen: Mitarbeiter dürfen
+                        # ausschließlich noch ausstehende eigene Anträge zurückziehen.
+                        # Bereits genehmigte/abgelehnte/stornierte Anträge bleiben unverändert,
+                        # selbst wenn sich der Status zwischen Anzeige und Klick geändert hat.
+                        _aktuell = st.session_state.vacation_requests
+                        _erlaubte_ids = _aktuell.loc[
+                            _aktuell["ID"].isin(ids)
+                            & (_aktuell["Mitarbeiter"] == benutzer)
+                            & (_aktuell["Status"] == "Ausstehend"),
+                            "ID"
+                        ].tolist()
+                        if not _erlaubte_ids:
+                            st.warning(t(
+                                "Der Antrag kann nicht mehr zurückgezogen werden. Genehmigte Anträge können nur von der Leitung storniert werden.",
+                                "The request can no longer be withdrawn. Approved requests can only be cancelled by management."
+                            ))
+                        else:
+                            st.session_state.vacation_requests = _aktuell[
+                                ~_aktuell["ID"].isin(_erlaubte_ids)
+                            ].reset_index(drop=True)
+                            speichern("vacation_requests")
+                            melde(f"{len(_erlaubte_ids)} Antrag/Anträge zurückgezogen.",
+                                  f"{len(_erlaubte_ids)} request(s) withdrawn.", "↩️")
+                            st.rerun()
 
             erledigt = eigene_antraege[eigene_antraege["Status"] != "Ausstehend"]
             if not erledigt.empty:
@@ -4887,7 +4905,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
             for _, _v in genehmigte.iterrows():
                 _start = _v["Startdatum"].strftime(DATUMSFORMAT) if isinstance(_v["Startdatum"], date) else str(_v["Startdatum"])
                 _ende = _v["Enddatum"].strftime(DATUMSFORMAT) if isinstance(_v["Enddatum"], date) else str(_v["Enddatum"])
-                _label = f"{_v['Mitarbeiter']} · {wert_label(_v['Art'])} · {_start} – {_ende} · {_v['ID']}"
+                _label = f"{_v['Mitarbeiter']} · {wert_label(_v['Art'])} · {_start} – {_ende}"
                 optionen[_label] = str(_v["ID"])
             _auswahl_label = st.selectbox(
                 t("Urlaubsantrag auswählen", "Select leave request"),
