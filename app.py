@@ -2511,6 +2511,20 @@ def bereich_titel(icon: str, titel: str, beschreibung: str = ""):
         unsafe_allow_html=True,
     )
 
+
+def unterbereich_titel(icon: str, titel: str, beschreibung: str = ""):
+    """Kleine visuelle Trennung innerhalb eines Reiters, z. B. Anlegen vs. Bearbeiten."""
+    import html
+    _icon = html.escape(str(icon))
+    _titel = html.escape(str(titel))
+    _beschreibung = html.escape(str(beschreibung))
+    st.markdown(
+        f'<div class="unterbereich-kopf"><div class="titel">{_icon} {_titel}</div>'
+        + (f'<div class="beschreibung">{_beschreibung}</div>' if _beschreibung else '')
+        + '</div>',
+        unsafe_allow_html=True,
+    )
+
 # ============================================================
 # 9. DESIGN
 # ============================================================
@@ -2572,14 +2586,24 @@ st.markdown(
     .bereich-kopf {
         background: rgba(255,255,255,.72);
         border: 1px solid rgba(255,255,255,.88);
-        border-left: 5px solid var(--primary);
-        border-radius: 16px;
-        padding: 14px 18px 13px 18px;
-        margin: 4px 0 18px 0;
-        box-shadow: 0 5px 18px rgba(31,46,74,.08);
+        border-left: 4px solid var(--primary);
+        border-radius: 12px;
+        padding: 9px 12px 8px 12px;
+        margin: 3px 0 11px 0;
+        box-shadow: 0 3px 12px rgba(31,46,74,.06);
     }
-    .bereich-kopf .titel { font-size: 1.18rem; font-weight: 750; margin-bottom: 3px; }
-    .bereich-kopf .beschreibung { color: var(--text-mild); font-size: .92rem; }
+    .bereich-kopf .titel { font-size: 1.02rem; font-weight: 750; margin-bottom: 2px; }
+    .bereich-kopf .beschreibung { color: var(--text-mild); font-size: .82rem; }
+    .unterbereich-kopf {
+        background: rgba(255,255,255,.48);
+        border: 1px solid rgba(31,46,74,.09);
+        border-left: 3px solid var(--primary);
+        border-radius: 10px;
+        padding: 7px 10px;
+        margin: 12px 0 8px 0;
+    }
+    .unterbereich-kopf .titel { font-size: .94rem; font-weight: 720; color: var(--text); }
+    .unterbereich-kopf .beschreibung { color: var(--text-mild); font-size: .78rem; margin-top: 1px; }
     /* Unterreiter deutlicher als Funktionsumschalter darstellen */
     div[data-baseweb="tab-list"] { gap: .35rem; }
     button[data-baseweb="tab"] { border-radius: 12px 12px 0 0; font-weight: 650; }
@@ -3752,7 +3776,7 @@ if st.session_state.role == "Mitarbeiter":
 
         # ---------- Wer ist gerade nicht da? ----------
         st.markdown("---")
-        st.markdown(f"##### {t('Im Team abwesend', 'Team absences')}")
+        unterbereich_titel("👥", t("Im Team abwesend", "Team absences"), t("Aktuelle Abwesenheiten im Team auf einen Blick.", "Current team absences at a glance."))
         team_df = kommende_abwesenheiten(21)
         if team_df.empty:
             st.caption(t("In den nächsten drei Wochen ist niemand abwesend.",
@@ -4154,7 +4178,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
 
             eigene_antraege = st.session_state.vacation_requests[st.session_state.vacation_requests["Mitarbeiter"] == benutzer] if not st.session_state.vacation_requests.empty else st.session_state.vacation_requests
             if not eigene_antraege.empty:
-                st.markdown(f"##### {t('Meine Anträge', 'My requests')}")
+                unterbereich_titel("🌴", t("Meine Anträge", "My requests"), t("Status deiner eingereichten Abwesenheitsanträge.", "Status of your submitted absence requests."))
                 tabelle(eigene_antraege.drop(columns=["ID", "Mitarbeiter"]))
 
     # ---------------- Zeiten & Export ----------------
@@ -4309,7 +4333,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
         # direkt in der Tabelle.
         if st.session_state.role == "Systemadministrator" and interne_ids_sichtbar():
             st.markdown("---")
-            st.markdown("##### 🛠️ Systemadmin: Einzelnen Eintrag über die ID bearbeiten")
+            unterbereich_titel("🛠️", "Systemadmin: Einzelnen Eintrag über die ID bearbeiten")
             zeit_df = st.session_state.time_logs.copy()
             if zeit_df.empty:
                 st.info("Keine Arbeitszeiten vorhanden.")
@@ -4507,7 +4531,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                         anzeige_gefiltert = gefiltert.drop(columns=["Kunde-ID", "Projekt-ID"], errors="ignore")
                     tabelle(anzeige_gefiltert)
 
-                    st.markdown(f"##### {t('Auswertung je Mitarbeiter', 'Per-employee summary')}")
+                    unterbereich_titel("👤", t("Auswertung je Mitarbeiter", "Per-employee summary"), t("Zusammenfassung der gefilterten Arbeitszeiten.", "Summary of the filtered working times."))
                     auswertung_zeiten = []
                     for name in sorted(gefiltert["Mitarbeiter"].unique()):
                         ist, soll, saldo = berechne_saldo(name, von, bis)
@@ -4749,7 +4773,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
         offene = df_vac[df_vac["Status"] == "Ausstehend"] if not df_vac.empty else df_vac
 
         # ---------- Abwesenheitskalender ----------
-        st.markdown(f"##### {t('Abwesenheitskalender', 'Absence calendar')}")
+        unterbereich_titel("📅", t("Abwesenheitskalender", "Absence calendar"), t("Abwesenheiten im gewählten Zeitraum.", "Absences in the selected period."))
         kal1, kal2 = st.columns([1, 2])
         kal_von = kal1.date_input(t("Start", "Start"), date.today(), format=DATUMSFORMAT_UI,
                                   key="abwkal_von")
@@ -4868,7 +4892,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                     st.rerun()
 
         st.markdown("---")
-        st.markdown(f"##### {t('Offene Anträge', 'Pending requests')}")
+        unterbereich_titel("⏳", t("Offene Anträge", "Pending requests"), t("Anträge prüfen und genehmigen oder ablehnen.", "Review requests and approve or reject them."))
 
         if offene.empty:
             st.success(t("Keine ausstehenden Anträge.", "No pending requests."))
@@ -4929,7 +4953,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                             st.rerun()
 
         st.markdown("---")
-        st.markdown(f"##### {t('Historie', 'History')}")
+        unterbereich_titel("🗂️", t("Historie", "History"), t("Bereits bearbeitete Anträge.", "Previously processed requests."))
         historie = df_vac[df_vac["Status"] != "Ausstehend"] if not df_vac.empty else df_vac
         if historie.empty:
             st.caption(t("Noch keine bearbeiteten Anträge.", "No processed requests yet."))
@@ -4941,7 +4965,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
         # nachvollziehbar, zählt aber nicht mehr als genehmigte Abwesenheit.
         genehmigte = df_vac[df_vac["Status"] == "Genehmigt"].copy() if not df_vac.empty else df_vac
         if (systemadmin_vollzugriff or st.session_state.role == "Leitung / Admin") and not genehmigte.empty:
-            st.markdown(f"##### {t('Genehmigte Urlaube stornieren', 'Cancel approved leave')}")
+            unterbereich_titel("↩️", t("Genehmigte Urlaube stornieren", "Cancel approved leave"), t("Nur Leitung/Admin kann bereits genehmigten Urlaub stornieren.", "Only management/admin can cancel approved leave."))
             optionen = {}
             for _, _v in genehmigte.iterrows():
                 _start = _v["Startdatum"].strftime(DATUMSFORMAT) if isinstance(_v["Startdatum"], date) else str(_v["Startdatum"])
@@ -4984,7 +5008,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
 
         if systemadmin_vollzugriff and not df_vac.empty:
             st.markdown("---")
-            st.markdown("##### 🛠️ Systemadmin: Urlaubsanträge bearbeiten")
+            unterbereich_titel("🛠️", "Systemadmin: Urlaubsanträge bearbeiten")
             st.caption("Klicke in der Tabelle auf einen Urlaubsantrag. Dieser wird automatisch in die Bearbeitungsmaske übernommen.")
             vac_tabelle = df_vac.copy()
             vac_anzeige = vac_tabelle.drop(columns=["ID"], errors="ignore")
@@ -5058,7 +5082,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
 
     # ---------------- Stammdaten ----------------
     with tab_stamm:
-        st.markdown(f"##### {t('Mitarbeitende bearbeiten', 'Edit employees')}")
+        unterbereich_titel("👥", t("Mitarbeitende bearbeiten", "Edit employees"), t("Stammdaten bestehender Mitarbeitender pflegen.", "Maintain existing employee master data."))
         st.caption(t("Namen können jederzeit korrigiert werden – die Zuordnung zum Benutzerkonto hängt "
                      "an der MA-ID. Erfasste Zeiten und Anträge werden mitgeändert.",
                      "Names can be corrected at any time – the link to the user account uses the "
@@ -5172,7 +5196,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                      "Logins are created in the “User accounts” tab."))
 
         st.markdown("---")
-        st.markdown(f"##### {t('Wochenarbeitszeitkalender', 'Weekly working-time calendar')}")
+        unterbereich_titel("📅", t("Wochenarbeitszeitkalender", "Weekly working-time calendar"), t("Regelmäßige Arbeitstage und Sollzeiten festlegen.", "Set regular working days and target hours."))
         st.caption(t(
             "Wiederkehrender Wochenplan je Person. Trage Beginn, Ende und Pause ein – "
             "die Sollstunden berechnet die App daraus automatisch. Freie Tage einfach abwählen.",
@@ -5351,7 +5375,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
 
         if systemadmin_vollzugriff and not st.session_state.mitarbeiter_stammdaten.empty:
             st.markdown("---")
-            st.markdown("##### 🛠️ Systemadmin: Mitarbeiter endgültig löschen")
+            unterbereich_titel("🛠️", "Systemadmin: Mitarbeiter endgültig löschen")
             personen = st.session_state.mitarbeiter_stammdaten[["MA-ID", "Mitarbeiter"]].copy()
             personen["Label"] = personen["Mitarbeiter"].astype(str) + " · " + personen["MA-ID"].astype(str)
             person_id = st.selectbox("Mitarbeiter auswählen", personen["MA-ID"].astype(str).tolist(), format_func=lambda x: personen.loc[personen["MA-ID"].astype(str) == x, "Label"].iloc[0], key="sys_ma_delete")
@@ -5507,7 +5531,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
     # ---------------- Benutzerkonten ----------------
     with tab_konten:
         admin_anzahl = len(aktive_admins())
-        st.markdown(f"##### {t('Kontoübersicht', 'Account overview')}")
+        unterbereich_titel("📋", t("Kontoübersicht", "Account overview"), t("Vorhandene Benutzerkonten und deren Zuordnung.", "Existing user accounts and their assignments."))
         uebersicht = benutzer_ohne_geheimnisse().copy()
         uebersicht.insert(1, "Person", uebersicht["MA-ID"].apply(id_zu_name).replace("", "—"))
         uebersicht = uebersicht.drop(columns=["MA-ID"])
@@ -5535,7 +5559,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
             st.error(t(f"Ohne gültige Personenzuordnung: {', '.join(verwaiste)}",
                        f"Without a valid person link: {', '.join(verwaiste)}"))
 
-        st.markdown(f"##### {t('Neues Konto anlegen', 'Create a new account')}")
+        unterbereich_titel("➕", t("Neues Benutzerkonto", "New user account"), t("Hier wird ein neuer Login für eine Person angelegt.", "Create a new login for a person here."))
         st.info(t("Das Systemadministrator-Konto wird ausschließlich vom Betreiber verwaltet und kann vom Kunden nicht angelegt oder einem Mitarbeiter zugeordnet werden. Kunden verwenden die Rolle „Leitung / Admin“ als KeyUser.",
                    "The System Administrator account is managed exclusively by the software operator and cannot be created or assigned by the customer. Customers use the “Management / Admin” role as KeyUser."))
         with st.container(border=True):
@@ -5607,7 +5631,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                           f"Account “{name_neu}” created – share the initial password.", "➕")
                     st.rerun()
 
-        st.markdown(f"##### {t('Konto bearbeiten', 'Edit account')}")
+        unterbereich_titel("✏️", t("Bestehendes Benutzerkonto bearbeiten", "Edit existing user account"), t("Konto auswählen und Zugang, Rolle oder Zuordnung ändern.", "Select an account and change access, role or assignment."))
         with st.container(border=True):
             konto_df = st.session_state.benutzer.copy()
             if not systemadmin_vollzugriff:
@@ -5806,7 +5830,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                     st.rerun()
 
         if systemadmin_vollzugriff:
-            st.markdown(f"##### {t('Betrieb', 'Company')}")
+            unterbereich_titel("🏢", t("Betrieb", "Company"), t("Firmendaten und Branchenzuordnung.", "Company data and industry assignment."))
             with st.container(border=True):
                 firmenname = st.text_input(t("Name der Einrichtung", "Organization name"), cfg("firmenname"))
                 branchen_liste = list(BRANCHEN.keys())
@@ -5820,7 +5844,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                            f"{t('Projektfeld', 'Project field')}: "
                            f"{vorschau['projekt_label'][1] if ist_englisch() else vorschau['projekt_label'][0]}")
         else:
-            st.markdown(f"##### {t('Betrieb', 'Company')}")
+            unterbereich_titel("🏢", t("Betrieb", "Company"), t("Firmendaten und Branchenzuordnung.", "Company data and industry assignment."))
             st.info(t(f"Einrichtung: **{cfg('firmenname')}** · Branche: **{branche_label(cfg('branche'))}**. "
                        "",
                        f"Company: **{cfg('firmenname')}** · Industry: **{branche_label(cfg('branche'))}**. "
@@ -5828,7 +5852,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
             firmenname = cfg("firmenname")
             gewaehlte_branche = cfg("branche")
 
-        st.markdown(f"##### {t('Erscheinungsbild', 'Appearance')}")
+        unterbereich_titel("🎨", t("Erscheinungsbild", "Appearance"), t("Logo und Darstellung der App anpassen.", "Adjust logo and app appearance."))
         with st.container(border=True):
             st.caption(t(
                 "Ein Firmenlogo kann von Leitung/Admin oder Systemadmin hinterlegt werden. Farben werden ausschließlich vom Systemadmin festgelegt.",
@@ -5878,7 +5902,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
         # Arbeitszeit- und Abwesenheitsarten werden branchenspezifisch ausgerollt.
         # Nur der Systemadmin bestimmt Branche/Firma; der Kunde darf die ausgerollten
         # Arten bearbeiten, solange sie noch nicht verwendet wurden.
-        st.markdown(f"##### {t('Arbeitszeit- und Abwesenheitsarten', 'Working-time and absence types')}")
+        unterbereich_titel("🗃️", t("Arbeitszeit- und Abwesenheitsarten", "Working-time and absence types"), t("Verfügbare Arten für Buchungen und Anträge verwalten.", "Manage available types for entries and requests."))
         with st.container(border=True):
             if systemadmin_vollzugriff:
                 st.caption(t(
@@ -5986,7 +6010,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
 
         alte_branche = cfg("branche")
 
-        st.markdown(f"##### {t('Funktionen', 'Features')}")
+        unterbereich_titel("⚙️", t("Funktionen", "Features"), t("Funktionen der App aktivieren oder deaktivieren.", "Enable or disable app features."))
         with st.container(border=True):
             live_stempeln = st.toggle(
                 t("🕒 Live-Stempeln aktivieren", "🕒 Enable live clocking"), cfg("live_stempeln_aktiv"),
@@ -5998,7 +6022,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                          "How far back each employee may edit times is set per person under "
                          "“👥 Employees” (default: 24 h)."))
 
-        st.markdown(f"##### {t('Pausenregelung', 'Break rules')}")
+        unterbereich_titel("☕", t("Pausenregelung", "Break rules"), t("Automatische Pausenberechnung festlegen.", "Configure automatic break calculation."))
         with st.container(border=True):
             c1, c2 = st.columns(2)
             schwelle_1 = c1.number_input(t("Pause ab mehr als … Std.", "Break after more than … h"),
@@ -6015,7 +6039,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                          "Default follows German law (§ 4 ArbZG): over 6 h → 30 min, over 9 h → 45 min."))
 
         if systemadmin_vollzugriff:
-            st.markdown("##### 🔐 Systemadmin: Sicherheit & Login")
+            unterbereich_titel("🔐", "Systemadmin: Sicherheit & Login")
             with st.container(border=True):
                 sec1, sec2 = st.columns(2)
                 sicher_mindest = sec1.number_input(
@@ -6029,7 +6053,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                     value=int(cfg("sperrdauer_minuten")), step=1, key="sys_sperrdauer")
                 st.caption("Diese Werte gelten für alle Benutzerkonten. Änderungen werden dauerhaft gespeichert.")
 
-        st.markdown(f"##### {t('Berechnung', 'Calculation')}")
+        unterbereich_titel("🧮", t("Berechnung", "Calculation"), t("Regeln für Zeit- und Urlaubsberechnungen.", "Rules for time and leave calculations."))
         with st.container(border=True):
             urlaub_arbeitstage = st.toggle(t("Urlaub in Arbeitstagen zählen (Mo–Fr)",
                                              "Count leave in working days (Mon–Fri)"),
