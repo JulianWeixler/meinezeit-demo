@@ -391,7 +391,7 @@ def meldungen_anzeigen() -> None:
 # Warum SQLite: eine einzelne Datei, kein Serverbetrieb nötig – für Demos beim
 # Kunden reicht das, ist aber eine "echte" Datenbank statt loser CSV-Dateien.
 
-DB_DATEI = DATEN_DIR / "zeiterfassung.db"
+DB_DATEI = BASE_DIR / "zeiterfassung.db"
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 PRODUKTIONS_DB = bool(DATABASE_URL)
 
