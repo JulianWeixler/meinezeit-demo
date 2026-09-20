@@ -828,7 +828,36 @@ INDIZES = {
                           'CREATE INDEX IF NOT EXISTS idx_urlaub_status ON vacation_requests("Status")'],
     "benutzer": ['CREATE INDEX IF NOT EXISTS idx_benutzer_name ON benutzer("Benutzername")'],
     "arbeitszeitkalender": ['CREATE INDEX IF NOT EXISTS idx_azkal_ma ON arbeitszeitkalender("MA-ID")'],
+    "kunden": [
+        'CREATE INDEX IF NOT EXISTS idx_kunden_nr ON kunden("Kundennummer")',
+        'CREATE UNIQUE INDEX IF NOT EXISTS ux_kunden_kundennummer ON kunden("Kundennummer")',
+    ],
+    "projekte": [
+        'CREATE INDEX IF NOT EXISTS idx_projekte_nr ON projekte("Projektnummer")',
+        'CREATE UNIQUE INDEX IF NOT EXISTS ux_projekte_projektnummer ON projekte("Projektnummer")',
+    ],
 }
+
+
+def eindeutige_nummer_pruefen(df: pd.DataFrame, spalte: str, nummer: str, eigene_id: str | None = None) -> bool:
+    """Prüft, ob eine Kunden-/Projektnummer bereits vergeben ist."""
+    nummer = str(nummer or "").strip()
+    if not nummer or df.empty or spalte not in df.columns:
+        return True
+    mask = df[spalte].fillna("").astype(str).str.strip().str.casefold() == nummer.casefold()
+    if eigene_id is not None and "Kunden-ID" in df.columns and spalte == "Kundennummer":
+        mask &= df["Kunden-ID"].astype(str) != str(eigene_id)
+    if eigene_id is not None and "Projekt-ID" in df.columns and spalte == "Projektnummer":
+        mask &= df["Projekt-ID"].astype(str) != str(eigene_id)
+    return not bool(mask.any())
+
+
+def doppelte_nummern(df: pd.DataFrame, spalte: str) -> list[str]:
+    if df.empty or spalte not in df.columns:
+        return []
+    werte = df[spalte].fillna("").astype(str).str.strip()
+    werte = werte[werte != ""]
+    return sorted(werte[werte.str.casefold().duplicated(keep=False)].unique().tolist())
 
 
 def indizes_anlegen() -> None:
@@ -5078,18 +5107,28 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                 strasse = st.text_input(t("Straße", "Street"), key="neu_kunden_strasse")
                 notiz = st.text_input(t("Notiz", "Note"), key="neu_kunden_notiz")
                 if st.button(t("💾 Kunde anlegen", "💾 Add customer"), key="kunde_anlegen", type="primary"):
+                    nr = knr.strip() or f"K-{len(st.session_state.kunden)+1:04d}"
                     if not kn.strip(): st.error(t("Bitte einen Kundennamen eingeben.", "Please enter a customer name."))
+                    elif not eindeutige_nummer_pruefen(st.session_state.kunden, "Kundennummer", nr):
+                        st.error(t(f"Die Kundennummer „{nr}“ ist bereits vergeben. Bitte eine andere Kundennummer verwenden.",
+                                    f"Customer number “{nr}” is already in use. Please use another customer number."))
                     else:
-                        nr = knr.strip() or f"K-{len(st.session_state.kunden)+1:04d}"
                         st.session_state.kunden = zeile_anhaengen(st.session_state.kunden, {"Kunden-ID": neue_id(), "Kundennummer": nr, "Kunde": kn.strip(), "Ansprechpartner": ap.strip(), "Telefon": tel.strip(), "E-Mail": email.strip(), "Straße": strasse.strip(), "PLZ": "", "Ort": ort.strip(), "Aktiv": True, "Notiz": notiz.strip()})
-                        speichern("kunden"); melde(f"Kunde „{kn.strip()}“ angelegt.", "Customer created.", "👤"); st.rerun()
+                        speichern("kunden")
+                        for _key in ("neu_kundennr", "neu_kunde", "neu_kunden_ap", "neu_kunden_tel", "neu_kunden_email", "neu_kunden_ort", "neu_kunden_strasse", "neu_kunden_notiz"):
+                            st.session_state.pop(_key, None)
+                        melde(f"Kunde „{kn.strip()}“ angelegt.", "Customer created.", "👤"); st.rerun()
             if st.session_state.kunden.empty:
                 st.info(t("Noch keine Kunden angelegt.", "No customers yet."))
             else:
                 kunden_edit = st.session_state.kunden.copy(); kunden_edit["Löschen"] = False
                 edited_k = st.data_editor(kunden_edit, use_container_width=True, hide_index=True, num_rows="fixed", key="kunden_editor", column_config={"Kunden-ID": st.column_config.TextColumn("ID", disabled=True), "Aktiv": st.column_config.CheckboxColumn("Aktiv"), "Löschen": st.column_config.CheckboxColumn("Löschen")})
                 if st.button(t("💾 Kundenänderungen speichern", "💾 Save customer changes"), key="kunden_speichern", type="primary"):
-                    if bool(edited_k["Löschen"].fillna(False).any()):
+                    doppelte_k = doppelte_nummern(edited_k, "Kundennummer")
+                    if doppelte_k:
+                        st.error(t(f"Kundennummern dürfen nicht doppelt vergeben werden: {', '.join(doppelte_k)}",
+                                   f"Customer numbers must be unique: {', '.join(doppelte_k)}"))
+                    elif bool(edited_k["Löschen"].fillna(False).any()):
                         ids = set(edited_k.loc[edited_k["Löschen"].fillna(False), "Kunden-ID"].astype(str))
                         linked = not st.session_state.projekte.empty and st.session_state.projekte["Kunden-ID"].astype(str).isin(ids).any()
                         if linked: st.error(t("Kunden mit verknüpften Projekten können nicht gelöscht werden. Setze sie auf Inaktiv.", "Customers with linked projects cannot be deleted. Set them inactive."))
@@ -5119,13 +5158,19 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                 satz = st.number_input(t("Stundensatz (optional)", "Hourly rate (optional)"), min_value=0.0, step=5.0, key="neu_projektsatz")
                 pnotiz = st.text_input(t("Notiz", "Note"), key="neu_projektnotiz")
                 if st.button(t("💾 Projekt anlegen", "💾 Add project"), key="projekt_anlegen", type="primary"):
+                    nr = pnr.strip() or f"P-{len(st.session_state.projekte)+1:04d}"
                     if not pname.strip(): st.error(t("Bitte einen Projektnamen eingeben.", "Please enter a project name."))
                     elif pkunde == "__KEINER__": st.error(t("Bitte einen Kunden auswählen.", "Please select a customer."))
                     elif ende is not None and ende < start: st.error(t("Das Enddatum darf nicht vor dem Startdatum liegen.", "End date cannot be before start date."))
+                    elif not eindeutige_nummer_pruefen(st.session_state.projekte, "Projektnummer", nr):
+                        st.error(t(f"Die Projektnummer „{nr}“ ist bereits vergeben. Bitte eine andere Projektnummer verwenden.",
+                                    f"Project number “{nr}” is already in use. Please use another project number."))
                     else:
-                        nr = pnr.strip() or f"P-{len(st.session_state.projekte)+1:04d}"
                         st.session_state.projekte = zeile_anhaengen(st.session_state.projekte, {"Projekt-ID": neue_id(), "Projektnummer": nr, "Projekt": pname.strip(), "Kunden-ID": pkunde, "Status": status, "Startdatum": start, "Enddatum": ende, "Stundensatz": float(satz), "Aktiv": True, "Notiz": pnotiz.strip()})
-                        speichern("projekte"); melde(f"Projekt „{pname.strip()}“ angelegt.", "Project created.", "📁"); st.rerun()
+                        speichern("projekte")
+                        for _key in ("neu_projektnr", "neu_projektname", "neu_projektkunde", "neu_projektstatus", "neu_projektstart", "neu_projektende", "neu_projektsatz", "neu_projektnotiz"):
+                            st.session_state.pop(_key, None)
+                        melde(f"Projekt „{pname.strip()}“ angelegt.", "Project created.", "📁"); st.rerun()
             if st.session_state.projekte.empty:
                 st.info(t("Noch keine Projekte angelegt.", "No projects yet."))
             else:
@@ -5134,7 +5179,12 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                 _proj_kunden_ids = _pk["Kunden-ID"].astype(str).tolist() if not _pk.empty else []
                 edited_p = st.data_editor(proj_edit, use_container_width=True, hide_index=True, num_rows="fixed", key="projekte_editor", column_config={"Projekt-ID": st.column_config.TextColumn("ID", disabled=True), "Kunden-ID": st.column_config.SelectboxColumn("Kunde", options=_proj_kunden_ids), "Startdatum": st.column_config.DateColumn("Startdatum", format=DATUMSFORMAT_UI), "Enddatum": st.column_config.DateColumn("Enddatum", format=DATUMSFORMAT_UI), "Stundensatz": st.column_config.NumberColumn("Stundensatz", min_value=0.0, step=5.0, format="%.2f"), "Aktiv": st.column_config.CheckboxColumn("Aktiv"), "Löschen": st.column_config.CheckboxColumn("Löschen")})
                 if st.button(t("💾 Projektänderungen speichern", "💾 Save project changes"), key="projekte_speichern", type="primary"):
-                    st.session_state.projekte = edited_p.drop(columns=["Löschen"]).reset_index(drop=True); speichern("projekte"); st.rerun()
+                    doppelte_p = doppelte_nummern(edited_p, "Projektnummer")
+                    if doppelte_p:
+                        st.error(t(f"Projektnummern dürfen nicht doppelt vergeben werden: {', '.join(doppelte_p)}",
+                                   f"Project numbers must be unique: {', '.join(doppelte_p)}"))
+                    else:
+                        st.session_state.projekte = edited_p.drop(columns=["Löschen"]).reset_index(drop=True); speichern("projekte"); st.rerun()
 
     # ---------------- Benutzerkonten ----------------
     with tab_konten:
