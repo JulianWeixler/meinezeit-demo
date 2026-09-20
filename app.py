@@ -2498,6 +2498,19 @@ def gruss(zeitpunkt: datetime = None) -> str:
     return t("Guten Abend", "Good evening")
 
 
+
+def bereich_titel(icon: str, titel: str, beschreibung: str = ""):
+    """Einheitlicher, kompakter Bereichskopf für eine klarere Endnutzer-Navigation."""
+    import html
+    _icon = html.escape(str(icon))
+    _titel = html.escape(str(titel))
+    _beschreibung = html.escape(str(beschreibung))
+    st.markdown(
+        f'<div class="bereich-kopf"><div class="titel">{_icon} {_titel}</div>'
+        f'<div class="beschreibung">{_beschreibung}</div></div>',
+        unsafe_allow_html=True,
+    )
+
 # ============================================================
 # 9. DESIGN
 # ============================================================
@@ -2554,6 +2567,22 @@ st.markdown(
     div[data-testid="stMetricValue"] { color: var(--text) !important; font-weight: 700; }
     div[data-testid="stExpander"] details { overflow: hidden; }
     div[data-testid="stExpander"] summary { font-weight: 600; }
+
+    /* --- Bereichsköpfe: klare visuelle Orientierung --- */
+    .bereich-kopf {
+        background: rgba(255,255,255,.72);
+        border: 1px solid rgba(255,255,255,.88);
+        border-left: 5px solid var(--primary);
+        border-radius: 16px;
+        padding: 14px 18px 13px 18px;
+        margin: 4px 0 18px 0;
+        box-shadow: 0 5px 18px rgba(31,46,74,.08);
+    }
+    .bereich-kopf .titel { font-size: 1.18rem; font-weight: 750; margin-bottom: 3px; }
+    .bereich-kopf .beschreibung { color: var(--text-mild); font-size: .92rem; }
+    /* Unterreiter deutlicher als Funktionsumschalter darstellen */
+    div[data-baseweb="tab-list"] { gap: .35rem; }
+    button[data-baseweb="tab"] { border-radius: 12px 12px 0 0; font-weight: 650; }
 
     /* --- Schaltflächen: Glas mit sanfter Tiefe --- */
     div.stButton > button, div.stFormSubmitButton > button, div.stDownloadButton > button {
@@ -4130,7 +4159,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
 
     # ---------------- Zeiten & Export ----------------
     with tab_zeiten:
-        st.markdown(f"#### {t('Alle Mitarbeiterzeiten', 'All employee times')}")
+        bereich_titel("📊", t("Zeiten", "Times"), t("Arbeitszeiten prüfen, nachtragen und korrigieren.", "Review, add and correct working times."))
         st.caption(t(
             "Leitung / Admin kann hier die Arbeitszeiten aller Mitarbeiter unabhängig vom persönlichen Nachtragslimit bearbeiten.",
             "Management / admin can edit all employees' working times here regardless of their personal backdating limit."))
@@ -4416,132 +4445,144 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                             st.rerun()
 
     # ---------------- Auswertungen ----------------
-    # Für alle Branchen: Arbeitszeiten + Abwesenheiten. Bei Handwerk/Bau und
-    # Dienstleistung/Beratung folgt darunter zusätzlich die Kunden-/Projekt-Auswertung.
     with tab_auswertung:
-        st.markdown(f"### {t('Zeiten auswerten & exportieren', 'Analyse & export times')}")
-        if st.session_state.time_logs.empty:
-            st.info(t("Bisher wurden keine Arbeitszeiten erfasst.", "No working times recorded yet."))
+        if mit_kunden_projekten:
+            _aus_tab_zeiten, _aus_tab_abw, _aus_tab_proj = st.tabs([
+                t("🕒 Arbeitszeiten", "🕒 Working times"),
+                t("🌴 Abwesenheiten", "🌴 Absences"),
+                t("📁 Kunden & Projekte", "📁 Customers & projects"),
+            ])
         else:
-            heute = date.today()
-            c1, c2, c3 = st.columns([2, 1, 1])
-            auswahl_ma = c1.multiselect(
-                t("Mitarbeitende", "Employees"), aktive_mitarbeiter(), default=[],
-                placeholder=t("Mitarbeiter wählen", "Choose employees"), key="aus_zeiten_mitarbeiter")
-            von = c2.date_input(t("Von", "From"), heute.replace(day=1), format=DATUMSFORMAT_UI, key="aus_zeiten_von")
-            bis = c3.date_input(t("Bis", "To"), heute, format=DATUMSFORMAT_UI, key="aus_zeiten_bis")
+            _aus_tab_zeiten, _aus_tab_abw = st.tabs([
+                t("🕒 Arbeitszeiten", "🕒 Working times"),
+                t("🌴 Abwesenheiten", "🌴 Absences"),
+            ])
+            _aus_tab_proj = None
 
-            ad_kunde = "__ALLE__"
-            ad_projekt = "__ALLE__"
-            if mit_kunden_projekten:
-                f1, f2 = st.columns(2)
-                _ad_kdf = aktive_kunden_df()
-                _ad_kids = ["__ALLE__"] + (_ad_kdf["Kunden-ID"].astype(str).tolist() if not _ad_kdf.empty else [])
-                ad_kunde = f1.selectbox(t("Kunde", "Customer"), _ad_kids,
-                    format_func=lambda x: t("Alle Kunden", "All customers") if x == "__ALLE__" else kunden_label(x), key="aus_zeiten_kunde")
-                _ad_pdf = aktive_projekte_df(None if ad_kunde == "__ALLE__" else ad_kunde)
-                _ad_pids = ["__ALLE__"] + (_ad_pdf["Projekt-ID"].astype(str).tolist() if not _ad_pdf.empty else [])
-                ad_projekt = f2.selectbox(projekt_label(), _ad_pids,
-                    format_func=lambda x: t("Alle", "All") + " " + projekt_label().lower() if x == "__ALLE__" else projekt_label_id(x), key="aus_zeiten_projekt")
-
-            gefiltert = zeiten_von(None, von, bis)
-            if auswahl_ma:
-                gefiltert = gefiltert[gefiltert["Mitarbeiter"].isin(auswahl_ma)]
-            if mit_kunden_projekten and ad_kunde != "__ALLE__":
-                gefiltert = gefiltert[gefiltert["Kunde-ID"].astype(str) == ad_kunde]
-            if mit_kunden_projekten and ad_projekt != "__ALLE__":
-                gefiltert = gefiltert[gefiltert["Projekt-ID"].astype(str) == ad_projekt]
-
-            if gefiltert.empty:
-                st.warning(t("Keine Einträge im gewählten Zeitraum.", "No entries in the selected period."))
+        with _aus_tab_zeiten:
+            bereich_titel("🕒", t("Arbeitszeiten", "Working times"), t("Arbeitszeiten filtern, prüfen und exportieren.", "Filter, review and export working times."))
+            if st.session_state.time_logs.empty:
+                st.info(t("Bisher wurden keine Arbeitszeiten erfasst.", "No working times recorded yet."))
             else:
-                netto_summe = pd.to_numeric(gefiltert["Netto (Std)"], errors="coerce").sum()
-                k1, k2, k3 = st.columns(3)
-                k1.metric(t("Einträge", "Entries"), len(gefiltert))
-                k2.metric(t("Netto-Stunden gesamt", "Total net hours"), f"{netto_summe:.2f}")
-                k3.metric(t("Laufend", "Running"), int((gefiltert["Status"] == "Läuft").sum()))
+                heute = date.today()
+                c1, c2, c3 = st.columns([2, 1, 1])
+                auswahl_ma = c1.multiselect(
+                    t("Mitarbeitende", "Employees"), aktive_mitarbeiter(), default=[],
+                    placeholder=t("Mitarbeiter wählen", "Choose employees"), key="aus_zeiten_mitarbeiter")
+                von = c2.date_input(t("Von", "From"), heute.replace(day=1), format=DATUMSFORMAT_UI, key="aus_zeiten_von")
+                bis = c3.date_input(t("Bis", "To"), heute, format=DATUMSFORMAT_UI, key="aus_zeiten_bis")
+
+                ad_kunde = "__ALLE__"
+                ad_projekt = "__ALLE__"
                 if mit_kunden_projekten:
-                    anzeige_gefiltert = zeit_mit_kunden_projekten(gefiltert).drop(columns=["Kunde-ID", "Projekt-ID"], errors="ignore")
+                    f1, f2 = st.columns(2)
+                    _ad_kdf = aktive_kunden_df()
+                    _ad_kids = ["__ALLE__"] + (_ad_kdf["Kunden-ID"].astype(str).tolist() if not _ad_kdf.empty else [])
+                    ad_kunde = f1.selectbox(t("Kunde", "Customer"), _ad_kids,
+                        format_func=lambda x: t("Alle Kunden", "All customers") if x == "__ALLE__" else kunden_label(x), key="aus_zeiten_kunde")
+                    _ad_pdf = aktive_projekte_df(None if ad_kunde == "__ALLE__" else ad_kunde)
+                    _ad_pids = ["__ALLE__"] + (_ad_pdf["Projekt-ID"].astype(str).tolist() if not _ad_pdf.empty else [])
+                    ad_projekt = f2.selectbox(projekt_label(), _ad_pids,
+                        format_func=lambda x: t("Alle", "All") + " " + projekt_label().lower() if x == "__ALLE__" else projekt_label_id(x), key="aus_zeiten_projekt")
+
+                gefiltert = zeiten_von(None, von, bis)
+                if auswahl_ma:
+                    gefiltert = gefiltert[gefiltert["Mitarbeiter"].isin(auswahl_ma)]
+                if mit_kunden_projekten and ad_kunde != "__ALLE__":
+                    gefiltert = gefiltert[gefiltert["Kunde-ID"].astype(str) == ad_kunde]
+                if mit_kunden_projekten and ad_projekt != "__ALLE__":
+                    gefiltert = gefiltert[gefiltert["Projekt-ID"].astype(str) == ad_projekt]
+
+                if gefiltert.empty:
+                    st.warning(t("Keine Einträge im gewählten Zeitraum.", "No entries in the selected period."))
                 else:
-                    anzeige_gefiltert = gefiltert.drop(columns=["Kunde-ID", "Projekt-ID"], errors="ignore")
-                tabelle(anzeige_gefiltert)
+                    netto_summe = pd.to_numeric(gefiltert["Netto (Std)"], errors="coerce").sum()
+                    k1, k2, k3 = st.columns(3)
+                    k1.metric(t("Einträge", "Entries"), len(gefiltert))
+                    k2.metric(t("Netto-Stunden gesamt", "Total net hours"), f"{netto_summe:.2f}")
+                    k3.metric(t("Laufend", "Running"), int((gefiltert["Status"] == "Läuft").sum()))
+                    if mit_kunden_projekten:
+                        anzeige_gefiltert = zeit_mit_kunden_projekten(gefiltert).drop(columns=["Kunde-ID", "Projekt-ID"], errors="ignore")
+                    else:
+                        anzeige_gefiltert = gefiltert.drop(columns=["Kunde-ID", "Projekt-ID"], errors="ignore")
+                    tabelle(anzeige_gefiltert)
 
-                st.markdown(f"##### {t('Auswertung je Mitarbeiter', 'Per-employee summary')}")
-                auswertung_zeiten = []
-                for name in sorted(gefiltert["Mitarbeiter"].unique()):
-                    ist, soll, saldo = berechne_saldo(name, von, bis)
-                    auswertung_zeiten.append({
-                        spalten_label("Mitarbeiter"): name, spalten_label("Ist (Std)"): ist,
-                        spalten_label("Soll (Std)"): soll, spalten_label("Saldo (Std)"): saldo,
-                    })
-                st.dataframe(pd.DataFrame(auswertung_zeiten), use_container_width=True, hide_index=True)
+                    st.markdown(f"##### {t('Auswertung je Mitarbeiter', 'Per-employee summary')}")
+                    auswertung_zeiten = []
+                    for name in sorted(gefiltert["Mitarbeiter"].unique()):
+                        ist, soll, saldo = berechne_saldo(name, von, bis)
+                        auswertung_zeiten.append({
+                            spalten_label("Mitarbeiter"): name, spalten_label("Ist (Std)"): ist,
+                            spalten_label("Soll (Std)"): soll, spalten_label("Saldo (Std)"): saldo,
+                        })
+                    st.dataframe(pd.DataFrame(auswertung_zeiten), use_container_width=True, hide_index=True)
 
-                e1, e2 = st.columns(2)
-                dateiname = f"Zeiterfassung_{von.strftime('%Y%m%d')}_{bis.strftime('%Y%m%d')}"
-                e1.download_button(t("📥 Zeiten als Excel", "📥 Times as Excel"), data=konvertiere_zu_excel(gefiltert),
-                    file_name=f"{dateiname}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True, key="aus_zeiten_excel")
-                e2.download_button(t("📥 Zeiten als CSV", "📥 Times as CSV"), data=konvertiere_zu_csv(gefiltert),
-                    file_name=f"{dateiname}.csv", mime="text/csv", use_container_width=True, key="aus_zeiten_csv")
+                    e1, e2 = st.columns(2)
+                    dateiname = f"Zeiterfassung_{von.strftime('%Y%m%d')}_{bis.strftime('%Y%m%d')}"
+                    e1.download_button(t("📥 Zeiten als Excel", "📥 Times as Excel"), data=konvertiere_zu_excel(gefiltert),
+                        file_name=f"{dateiname}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True, key="aus_zeiten_excel")
+                    e2.download_button(t("📥 Zeiten als CSV", "📥 Times as CSV"), data=konvertiere_zu_csv(gefiltert),
+                        file_name=f"{dateiname}.csv", mime="text/csv", use_container_width=True, key="aus_zeiten_csv")
 
-        st.markdown("---")
-        st.markdown(f"### {t('Abwesenheiten auswerten & exportieren', 'Analyse & export absences')}")
-        urlaub_df = st.session_state.vacation_requests.copy()
-        if urlaub_df.empty:
-            st.info(t("Bisher wurden keine Abwesenheiten beantragt.", "No absences have been requested yet."))
-        else:
-            heute_u = date.today()
-            u1, u2 = st.columns(2)
-            uvon = u1.date_input(t("Von", "From"), heute_u.replace(day=1), format=DATUMSFORMAT_UI, key="aus_urlaub_von")
-            ubis = u2.date_input(t("Bis", "To"), heute_u, format=DATUMSFORMAT_UI, key="aus_urlaub_bis")
-            u3, u4, u5 = st.columns(3)
-            _u_ma = sorted([str(x) for x in urlaub_df["Mitarbeiter"].dropna().unique() if str(x).strip()])
-            _u_art = sorted([str(x) for x in urlaub_df["Art"].dropna().unique() if str(x).strip()])
-            _u_status = sorted([str(x) for x in urlaub_df["Status"].dropna().unique() if str(x).strip()])
-            uma = u3.multiselect(t("Mitarbeitende", "Employees"), _u_ma, placeholder=t("Mitarbeiter wählen", "Choose employees"), key="aus_urlaub_ma")
-            uart = u4.multiselect(t("Abwesenheitsart", "Absence type"), _u_art, placeholder=t("Alle Arten", "All types"), key="aus_urlaub_art")
-            ustatus = u5.multiselect(t("Status", "Status"), _u_status, placeholder=t("Alle Status", "All statuses"), key="aus_urlaub_status")
 
-            if uvon > ubis:
-                st.error(t("Von darf nicht nach Bis liegen.", "From cannot be after To."))
+        with _aus_tab_abw:
+            bereich_titel("🌴", t("Abwesenheiten & Urlaub", "Absences & leave"), t("Urlaub und andere Abwesenheiten filtern und exportieren.", "Filter and export leave and other absences."))
+            urlaub_df = st.session_state.vacation_requests.copy()
+            if urlaub_df.empty:
+                st.info(t("Bisher wurden keine Abwesenheiten beantragt.", "No absences have been requested yet."))
             else:
-                urlaub_df["Startdatum"] = pd.to_datetime(urlaub_df["Startdatum"], errors="coerce").dt.date
-                urlaub_df["Enddatum"] = pd.to_datetime(urlaub_df["Enddatum"], errors="coerce").dt.date
-                # Ein Antrag gehört in den Zeitraum, sobald er ihn an mindestens einem Tag überschneidet.
-                uflt = urlaub_df[(urlaub_df["Startdatum"] <= ubis) & (urlaub_df["Enddatum"] >= uvon)].copy()
-                if uma:
-                    uflt = uflt[uflt["Mitarbeiter"].isin(uma)]
-                if uart:
-                    uflt = uflt[uflt["Art"].isin(uart)]
-                if ustatus:
-                    uflt = uflt[uflt["Status"].isin(ustatus)]
-                if uflt.empty:
-                    st.warning(t("Keine Abwesenheiten für die gewählten Filter.", "No absences for the selected filters."))
+                heute_u = date.today()
+                u1, u2 = st.columns(2)
+                uvon = u1.date_input(t("Von", "From"), heute_u.replace(day=1), format=DATUMSFORMAT_UI, key="aus_urlaub_von")
+                ubis = u2.date_input(t("Bis", "To"), heute_u, format=DATUMSFORMAT_UI, key="aus_urlaub_bis")
+                u3, u4, u5 = st.columns(3)
+                _u_ma = sorted([str(x) for x in urlaub_df["Mitarbeiter"].dropna().unique() if str(x).strip()])
+                _u_art = sorted([str(x) for x in urlaub_df["Art"].dropna().unique() if str(x).strip()])
+                _u_status = sorted([str(x) for x in urlaub_df["Status"].dropna().unique() if str(x).strip()])
+                uma = u3.multiselect(t("Mitarbeitende", "Employees"), _u_ma, placeholder=t("Mitarbeiter wählen", "Choose employees"), key="aus_urlaub_ma")
+                uart = u4.multiselect(t("Abwesenheitsart", "Absence type"), _u_art, placeholder=t("Alle Arten", "All types"), key="aus_urlaub_art")
+                ustatus = u5.multiselect(t("Status", "Status"), _u_status, placeholder=t("Alle Status", "All statuses"), key="aus_urlaub_status")
+
+                if uvon > ubis:
+                    st.error(t("Von darf nicht nach Bis liegen.", "From cannot be after To."))
                 else:
-                    uk1, uk2, uk3 = st.columns(3)
-                    uk1.metric(t("Anträge", "Requests"), len(uflt))
-                    uk2.metric(t("Tage", "Days"), int(pd.to_numeric(uflt["Tage"], errors="coerce").fillna(0).sum()))
-                    uk3.metric(t("Stunden", "Hours"), f"{pd.to_numeric(uflt['Stunden'], errors='coerce').fillna(0).sum():.2f}")
-                    oeffentliche_spalten = [c for c in ["Mitarbeiter", "Startdatum", "Enddatum", "Einheit", "Tage", "Stunden", "Art", "Kommentar", "Status", "Eingereicht am", "Entscheidungsgrund", "Erfasst von"] if c in uflt.columns]
-                    uexport = uflt[oeffentliche_spalten].copy()
-                    st.dataframe(uexport, use_container_width=True, hide_index=True)
-                    upuffer = io.BytesIO()
-                    with pd.ExcelWriter(upuffer, engine="openpyxl") as writer:
-                        uexport.to_excel(writer, index=False, sheet_name="Abwesenheiten")
-                    ucsv = uexport.to_csv(index=False, sep=";", encoding="utf-8-sig").encode("utf-8-sig")
-                    ue1, ue2 = st.columns(2)
-                    uname = f"Abwesenheiten_{uvon:%Y%m%d}_{ubis:%Y%m%d}"
-                    ue1.download_button(t("📥 Abwesenheiten als Excel", "📥 Absences as Excel"), data=upuffer.getvalue(),
-                        file_name=f"{uname}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        use_container_width=True, key="aus_urlaub_excel")
-                    ue2.download_button(t("📥 Abwesenheiten als CSV", "📥 Absences as CSV"), data=ucsv,
-                        file_name=f"{uname}.csv", mime="text/csv", use_container_width=True, key="aus_urlaub_csv")
+                    urlaub_df["Startdatum"] = pd.to_datetime(urlaub_df["Startdatum"], errors="coerce").dt.date
+                    urlaub_df["Enddatum"] = pd.to_datetime(urlaub_df["Enddatum"], errors="coerce").dt.date
+                    # Ein Antrag gehört in den Zeitraum, sobald er ihn an mindestens einem Tag überschneidet.
+                    uflt = urlaub_df[(urlaub_df["Startdatum"] <= ubis) & (urlaub_df["Enddatum"] >= uvon)].copy()
+                    if uma:
+                        uflt = uflt[uflt["Mitarbeiter"].isin(uma)]
+                    if uart:
+                        uflt = uflt[uflt["Art"].isin(uart)]
+                    if ustatus:
+                        uflt = uflt[uflt["Status"].isin(ustatus)]
+                    if uflt.empty:
+                        st.warning(t("Keine Abwesenheiten für die gewählten Filter.", "No absences for the selected filters."))
+                    else:
+                        uk1, uk2, uk3 = st.columns(3)
+                        uk1.metric(t("Anträge", "Requests"), len(uflt))
+                        uk2.metric(t("Tage", "Days"), int(pd.to_numeric(uflt["Tage"], errors="coerce").fillna(0).sum()))
+                        uk3.metric(t("Stunden", "Hours"), f"{pd.to_numeric(uflt['Stunden'], errors='coerce').fillna(0).sum():.2f}")
+                        oeffentliche_spalten = [c for c in ["Mitarbeiter", "Startdatum", "Enddatum", "Einheit", "Tage", "Stunden", "Art", "Kommentar", "Status", "Eingereicht am", "Entscheidungsgrund", "Erfasst von"] if c in uflt.columns]
+                        uexport = uflt[oeffentliche_spalten].copy()
+                        st.dataframe(uexport, use_container_width=True, hide_index=True)
+                        upuffer = io.BytesIO()
+                        with pd.ExcelWriter(upuffer, engine="openpyxl") as writer:
+                            uexport.to_excel(writer, index=False, sheet_name="Abwesenheiten")
+                        ucsv = uexport.to_csv(index=False, sep=";", encoding="utf-8-sig").encode("utf-8-sig")
+                        ue1, ue2 = st.columns(2)
+                        uname = f"Abwesenheiten_{uvon:%Y%m%d}_{ubis:%Y%m%d}"
+                        ue1.download_button(t("📥 Abwesenheiten als Excel", "📥 Absences as Excel"), data=upuffer.getvalue(),
+                            file_name=f"{uname}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            use_container_width=True, key="aus_urlaub_excel")
+                        ue2.download_button(t("📥 Abwesenheiten als CSV", "📥 Absences as CSV"), data=ucsv,
+                            file_name=f"{uname}.csv", mime="text/csv", use_container_width=True, key="aus_urlaub_csv")
 
     # ---------------- Kunden-/Projekt-Auswertung (nur passende Branchen) ----------------
     if mit_kunden_projekten:
-      with tab_auswertung:
-            st.markdown("---")
-            st.markdown(f"### {t('Auswertung nach Kunde & Projekt', 'Customer & project analysis')}")
+      with _aus_tab_proj:
+            bereich_titel("📁", t("Kunden- & Projektauswertung", "Customer & project analysis"), t("Projektstunden nach Kunde, Projekt und Mitarbeiter auswerten und exportieren.", "Analyse and export project hours by customer, project and employee."))
             heute_a = date.today()
             c1, c2 = st.columns(2)
             avon = c1.date_input(t("Von", "From"), heute_a.replace(day=1), format=DATUMSFORMAT_UI, key="aus_von")
@@ -5345,7 +5386,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
         if not kunden_projekte_aktiv():
             st.info(t("Das Kundenmodul wird für Handwerk/Bau und Dienstleistung/Beratung angezeigt.", "The customer module is shown for trades/construction and services/consulting."))
         else:
-            st.markdown(f"### {t('Kundenverwaltung', 'Customer management')}")
+            bereich_titel("👤", t("Kunden", "Customers"), t("Kunden anlegen, bearbeiten und aktiv oder inaktiv setzen.", "Create, edit and activate or deactivate customers."))
             # Robuster Formular-Reset: Nach erfolgreicher Anlage wird die Widget-Version erhöht.
             # Dadurch erzeugt Streamlit beim nächsten Lauf neue Widgets mit leeren Standardwerten.
             _kunde_form_version = int(st.session_state.get("_kunde_form_version", 0))
@@ -5400,7 +5441,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
         if not kunden_projekte_aktiv():
             st.info(t("Das Projektmodul wird für Handwerk/Bau und Dienstleistung/Beratung angezeigt.", "The project module is shown for trades/construction and services/consulting."))
         else:
-            st.markdown(f"### {t('Projektverwaltung', 'Project management')}")
+            bereich_titel("📁", t("Projekte", "Projects"), t("Projekte verwalten und Kunden zuordnen.", "Manage projects and assign customers."))
             _projekt_form_version = int(st.session_state.get("_projekt_form_version", 0))
             with st.expander(t("➕ Neues Projekt anlegen", "➕ Add project"), expanded=False):
                 c1,c2,c3 = st.columns(3)
@@ -5781,7 +5822,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
         else:
             st.markdown(f"##### {t('Betrieb', 'Company')}")
             st.info(t(f"Einrichtung: **{cfg('firmenname')}** · Branche: **{branche_label(cfg('branche'))}**. "
-                       "Firmenname und Branche werden ausschließlich vom Systemadmin festgelegt.",
+                       "",
                        f"Company: **{cfg('firmenname')}** · Industry: **{branche_label(cfg('branche'))}**. "
                        "Company name and industry are set exclusively by the system administrator."))
             firmenname = cfg("firmenname")
