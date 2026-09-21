@@ -446,9 +446,53 @@ def meldungen_anzeigen() -> None:
 # Warum SQLite: eine einzelne Datei, kein Serverbetrieb nötig – für Demos beim
 # Kunden reicht das, ist aber eine "echte" Datenbank statt loser CSV-Dateien.
 
-DB_DATEI = APP_DIR / "zeiterfassung.db"
+# Die Datenbank liegt im Ordner "daten" – dort erwarten sie backup.py, backup.sh,
+# die Migration nach PostgreSQL und die Installationsanleitung. Eine frühere
+# Fassung legte sie im Hauptordner ab; dann sicherte das nächtliche Backup eine
+# nicht vorhandene Datei und brach jede Nacht still mit FileNotFoundError ab.
+DB_DATEI = DATEN_DIR / "zeiterfassung.db"
+_ALTER_DB_ORT = APP_DIR / "zeiterfassung.db"
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 PRODUKTIONS_DB = bool(DATABASE_URL)
+
+
+def _sqlite_hat_tabellen(pfad: Path) -> bool:
+    if not pfad.exists() or pfad.stat().st_size == 0:
+        return False
+    try:
+        with sqlite3.connect(pfad) as conn:
+            return conn.execute(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table'").fetchone()[0] > 0
+    except Exception:
+        return False
+
+
+def _datenbank_an_richtigen_ort() -> None:
+    """Zieht eine Datenbank vom alten Ort (Hauptordner) einmalig nach daten/ um."""
+    if PRODUKTIONS_DB or not _sqlite_hat_tabellen(_ALTER_DB_ORT):
+        return
+    DATEN_DIR.mkdir(parents=True, exist_ok=True)
+    if _sqlite_hat_tabellen(DB_DATEI):
+        # Beide Orte enthalten Daten – nicht raten, sondern melden
+        protokolliere(
+            f"Zwei Datenbanken gefunden: {_ALTER_DB_ORT} und {DB_DATEI}. "
+            f"Verwendet wird {DB_DATEI}. Bitte prüfen und die alte Datei entfernen.",
+            stufe=logging.WARNING)
+        return
+    try:
+        # Zugehörige WAL-/SHM-Dateien mitnehmen, sonst gehen die letzten
+        # noch nicht eingearbeiteten Änderungen verloren
+        for endung in ("", "-wal", "-shm"):
+            quelle = Path(str(_ALTER_DB_ORT) + endung)
+            if quelle.exists():
+                os.replace(quelle, Path(str(DB_DATEI) + endung))
+        protokolliere(f"Datenbank von {_ALTER_DB_ORT} nach {DB_DATEI} verschoben",
+                      stufe=logging.WARNING)
+    except Exception as exc:
+        protokolliere("Datenbank konnte nicht verschoben werden", exc)
+
+
+_datenbank_an_richtigen_ort()
 
 
 def _dateirechte_sichern(pfad: Path) -> None:
@@ -1094,6 +1138,148 @@ def _speichern_inkrementell(conn: sqlite3.Connection, key: str,
             conn.execute(f"UPDATE {table} SET {set_sql} WHERE {pk} = ?", values)
 
 
+# ------------------------------------------------------------
+# Änderungsprotokoll
+# ------------------------------------------------------------
+# Jede Änderung an Arbeitszeiten und Abwesenheiten wird mit altem und neuem Wert,
+# Person und Zeitpunkt festgehalten. Das Protokoll ist nur anfügbar: Die App bietet
+# keine Funktion zum Ändern oder Löschen von Einträgen. Kommt es zum Streit über
+# Überstunden, ist nachvollziehbar, wer wann was geändert hat.
+
+PROTOKOLL_TABELLE = "aenderungsprotokoll"
+PROTOKOLL_SPALTEN = ["Protokoll-ID", "Zeitpunkt", "Benutzer", "Rolle", "Aktion", "Bereich",
+                     "Datensatz-ID", "Mitarbeiter", "Feld", "Alter Wert", "Neuer Wert"]
+
+# Tabelle -> (Bereich, Schlüsselspalte, protokollierte Felder)
+PROTOKOLLIERTE_TABELLEN = {
+    "time_logs": ("Arbeitszeit", "ID", [
+        "Mitarbeiter", "Datum", "Kommen", "Gehen", "Pause (Min)", "Netto (Std)",
+        "Kategorie", "Kunde-ID", "Projekt-ID", "Projekt", "Notiz", "Status"]),
+    "vacation_requests": ("Abwesenheit", "ID", [
+        "Mitarbeiter", "Startdatum", "Enddatum", "Einheit", "Tage", "Stunden", "Art",
+        "Status", "Entscheidungsgrund"]),
+}
+
+
+def _protokollwert(wert) -> str:
+    """Einheitliche Textform, damit 8 und 8.0 oder None und "" nicht als Änderung gelten."""
+    if wert is None:
+        return ""
+    try:
+        if pd.isna(wert):
+            return ""
+    except (TypeError, ValueError):
+        pass
+    if isinstance(wert, (datetime, pd.Timestamp)):
+        return wert.strftime(DATUMSFORMAT)
+    if isinstance(wert, date):
+        return wert.strftime(DATUMSFORMAT)
+    if isinstance(wert, bool):
+        return "ja" if wert else "nein"
+    if isinstance(wert, float):
+        return f"{wert:.2f}".rstrip("0").rstrip(".") if wert != int(wert) else str(int(wert))
+    text = str(wert).strip()
+    return "" if text in ("nan", "None", "NaT", "<NA>") else text
+
+
+def _kurzbeschreibung(key: str, zeile: dict) -> str:
+    if key == "time_logs":
+        netto = _protokollwert(zeile.get("Netto (Std)"))
+        return (f"{_protokollwert(zeile.get('Datum'))} "
+                f"{_protokollwert(zeile.get('Kommen'))}–{_protokollwert(zeile.get('Gehen')) or '…'}"
+                + (f" ({netto} Std.)" if netto else ""))
+    return (f"{_protokollwert(zeile.get('Startdatum'))}–{_protokollwert(zeile.get('Enddatum'))} "
+            f"{_protokollwert(zeile.get('Art'))} ({_protokollwert(zeile.get('Status'))})")
+
+
+def _protokolleintraege(key: str, alt: pd.DataFrame, neu: pd.DataFrame) -> list:
+    """Vergleicht alten und neuen Stand und erzeugt die Protokollzeilen."""
+    if key not in PROTOKOLLIERTE_TABELLEN:
+        return []
+    bereich, id_spalte, felder = PROTOKOLLIERTE_TABELLEN[key]
+    alt_idx = ({str(r[id_spalte]): r for r in alt.to_dict("records")}
+               if not alt.empty and id_spalte in alt.columns else {})
+    neu_idx = ({str(r[id_spalte]): r for r in neu.to_dict("records")}
+               if not neu.empty and id_spalte in neu.columns else {})
+
+    benutzer = str(st.session_state.get("username") or "System")
+    rolle = str(st.session_state.get("role") or "")
+    zeitpunkt = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    zeilen = []
+
+    def eintrag(aktion, rid, mitarbeiter, feld="", alt_w="", neu_w=""):
+        zeilen.append((uuid.uuid4().hex[:12], zeitpunkt, benutzer, rolle, aktion, bereich,
+                       rid, mitarbeiter, feld, alt_w, neu_w))
+
+    for rid in neu_idx.keys() - alt_idx.keys():
+        z = neu_idx[rid]
+        # Eine laufende Live-Buchung ist ein Einstempeln, alles andere ein Eintrag
+        aktion = "Eingestempelt" if key == "time_logs" and _protokollwert(z.get("Status")) == "Läuft" else "Angelegt"
+        eintrag(aktion, rid, _protokollwert(z.get("Mitarbeiter")), "", "", _kurzbeschreibung(key, z))
+
+    for rid in alt_idx.keys() - neu_idx.keys():
+        z = alt_idx[rid]
+        eintrag("Gelöscht", rid, _protokollwert(z.get("Mitarbeiter")), "", _kurzbeschreibung(key, z), "")
+
+    for rid in alt_idx.keys() & neu_idx.keys():
+        a, n = alt_idx[rid], neu_idx[rid]
+        geaendert = [f for f in felder
+                     if _protokollwert(a.get(f)) != _protokollwert(n.get(f))]
+        if not geaendert:
+            continue
+        # Normales Ausstempeln ist keine Korrektur – eine Zeile statt vier
+        if (key == "time_logs" and _protokollwert(a.get("Status")) == "Läuft"
+                and _protokollwert(n.get("Status")) != "Läuft"
+                and set(geaendert) <= {"Gehen", "Pause (Min)", "Netto (Std)", "Status"}):
+            eintrag("Ausgestempelt", rid, _protokollwert(n.get("Mitarbeiter")), "", "",
+                    _kurzbeschreibung(key, n))
+            continue
+        for feld in geaendert:
+            eintrag("Geändert", rid, _protokollwert(n.get("Mitarbeiter")), feld,
+                    _protokollwert(a.get(feld)), _protokollwert(n.get(feld)))
+    return zeilen
+
+
+def _protokoll_schreiben(conn, zeilen: list) -> None:
+    if not zeilen:
+        return
+    spalten = ", ".join(f'"{s}"' for s in PROTOKOLL_SPALTEN)
+    conn.execute(f'CREATE TABLE IF NOT EXISTS "{PROTOKOLL_TABELLE}" '
+                 f'({", ".join(f"{chr(34)}{s}{chr(34)} TEXT" for s in PROTOKOLL_SPALTEN)})')
+    platzhalter = ", ".join("?" for _ in PROTOKOLL_SPALTEN)
+    for zeile in zeilen:
+        conn.execute(f'INSERT INTO "{PROTOKOLL_TABELLE}" ({spalten}) VALUES ({platzhalter})', zeile)
+
+
+def protokoll_laden(mitarbeiter: str | None = None, von: date | None = None,
+                    bis: date | None = None, grenze: int = 2000) -> pd.DataFrame:
+    """Liest das Änderungsprotokoll, neueste Einträge zuerst."""
+    leer = pd.DataFrame(columns=PROTOKOLL_SPALTEN)
+    if not PERSISTENZ:
+        return leer
+    try:
+        with _verbindung() as conn:
+            if not _tabelle_vorhanden(conn, PROTOKOLL_TABELLE):
+                return leer
+            bedingungen, werte = [], []
+            if mitarbeiter:
+                bedingungen.append('"Mitarbeiter" = ?'); werte.append(str(mitarbeiter))
+            if von is not None:
+                bedingungen.append('"Zeitpunkt" >= ?'); werte.append(von.strftime("%Y-%m-%d 00:00:00"))
+            if bis is not None:
+                bedingungen.append('"Zeitpunkt" <= ?'); werte.append(bis.strftime("%Y-%m-%d 23:59:59"))
+            sql = f'SELECT * FROM "{PROTOKOLL_TABELLE}"'
+            if bedingungen:
+                sql += " WHERE " + " AND ".join(bedingungen)
+            sql += f' ORDER BY "Zeitpunkt" DESC LIMIT {int(grenze)}'
+            cur = conn.execute(sql, tuple(werte))
+            daten = cur.fetchall()
+        return pd.DataFrame(daten, columns=PROTOKOLL_SPALTEN)
+    except Exception as exc:
+        protokolliere("Änderungsprotokoll konnte nicht gelesen werden", exc)
+        return leer
+
+
 def speichern(key: str) -> bool:
     """Speichert Änderungen atomar und inkrementell in der konfigurierten Datenbank."""
     # Zwischenspeicher verwerfen, die von dieser Tabelle abhängen
@@ -1107,9 +1293,15 @@ def speichern(key: str) -> bool:
         snapshots = st.session_state.setdefault("_db_snapshots", {})
         alt = snapshots.get(key, pd.DataFrame(columns=neu.columns)).copy()
 
+        # Protokollzeilen VOR dem Schreiben bilden und in derselben Transaktion
+        # speichern: Entweder landen Änderung und Protokoll gemeinsam in der
+        # Datenbank oder keins von beiden. Ein Protokoll, dem Einträge fehlen
+        # können, wäre als Nachweis wertlos.
+        protokollzeilen = _protokolleintraege(key, alt, neu)
         with _verbindung() as conn:
             conn.execute("BEGIN IMMEDIATE")
             _speichern_inkrementell(conn, key, alt, neu)
+            _protokoll_schreiben(conn, protokollzeilen)
             conn.commit()
 
         snapshots[key] = neu.copy(deep=True)
@@ -1144,7 +1336,19 @@ def _typen_angleichen(df: pd.DataFrame, spalten: list[str]) -> pd.DataFrame:
     for spalte in spalten:
         if spalte not in df.columns:
             df[spalte] = pd.NA
+    # Zahlenspalten ausdrücklich als Zahlen führen. Eine Spalte, die nur leere
+    # Werte enthält (etwa bei laufenden Buchungen), wird sonst als Text erkannt.
+    # Ab Pandas 3 lässt sich in solche Spalten keine Zahl mehr schreiben – das
+    # Speichern der Zeitentabelle bräche dann mit TypeError ab.
+    for spalte in ZAHLENSPALTEN:
+        if spalte in df.columns:
+            df[spalte] = pd.to_numeric(df[spalte], errors="coerce").astype("float64")
     return df[spalten]
+
+
+ZAHLENSPALTEN = ("Brutto (Std)", "Pause (Min)", "Netto (Std)", "Tage", "Stunden",
+                 "Wochenstunden", "Urlaub_Pro_Jahr", "Resturlaub_Vorjahr",
+                 "Nachtrag_Std_Limit", "Pause_Min", "Soll_Std", "Wochentag", "Stundensatz")
 
 
 def _aus_alter_csv_migrieren(key: str, spalten: list[str]) -> pd.DataFrame | None:
@@ -1511,7 +1715,12 @@ def _erstbefuellung() -> None:
         speichern("projekte")
 
     if not einstellungen_laden():
-        einstellungen_speichern(STANDARD_CONFIG)
+        # Neuinstallation: Alle Werte werden bereits in TAGEN angelegt. Die einmalige
+        # Umrechnung Stunden -> Tage ist nur für Datenbestände älterer Versionen
+        # gedacht. Ohne diese Markierung würde sie auch hier laufen und aus dem
+        # Standard von 1 Tag ein Fenster von 1 Stunde machen.
+        einstellungen_speichern({**STANDARD_CONFIG,
+                                 "migration_nachtrag_stunden_zu_tage": True})
 
     indizes_anlegen()
 
@@ -2557,9 +2766,11 @@ def bereich_titel(icon: str, titel: str, beschreibung: str = ""):
     _icon = html.escape(str(icon))
     _titel = html.escape(str(titel))
     _beschreibung = html.escape(str(beschreibung))
+    # Leere Beschreibungszeile weglassen – sie kostet auf dem Telefon Platz
     st.markdown(
         f'<div class="bereich-kopf"><div class="titel">{_icon} {_titel}</div>'
-        f'<div class="beschreibung">{_beschreibung}</div></div>',
+        + (f'<div class="beschreibung">{_beschreibung}</div>' if _beschreibung else '')
+        + '</div>',
         unsafe_allow_html=True,
     )
 
@@ -2791,9 +3002,26 @@ st.markdown(
         .stApp hr { margin: .5rem 0; }
         div[data-testid="stExpander"] summary { padding: .4rem .6rem; font-size: .92rem; }
 
-        /* Eingabefelder kompakter, Beschriftungen kleiner */
+        /* Eingabefelder: iOS vergrößert die Seite automatisch, sobald ein Feld mit
+           weniger als 16 px Schrift angetippt wird. Danach steht die Ansicht schief
+           und man muss von Hand herauszoomen. 16 px verhindern das zuverlässig. */
         .stApp label p { font-size: .82rem; margin-bottom: 2px; }
+        .stApp input, .stApp textarea, .stApp select,
+        .stApp div[data-baseweb="select"] div,
+        .stApp div[data-baseweb="input"] input { font-size: 16px !important; }
         .stApp input { padding: .45rem .6rem !important; }
+
+        /* Platz für den Home-Balken moderner iPhones, wenn die App als
+           Lesezeichen auf dem Startbildschirm liegt */
+        div[data-testid="stAppViewContainer"] .block-container {
+            padding-bottom: calc(3.5rem + env(safe-area-inset-bottom)) !important;
+        }
+
+        /* Bereichsköpfe auf dem Telefon kompakter, Unterbeschreibungen weg */
+        .bereich-kopf { padding: 8px 12px !important; margin: 4px 0 8px 0 !important; }
+        .bereich-kopf .titel { font-size: .95rem !important; }
+        .bereich-kopf .beschreibung { font-size: .76rem !important; }
+        .unterbereich-kopf .beschreibung { display: none; }
         div[data-testid="stCaptionContainer"] p { font-size: .78rem; }
 
         /* Das Konto-Menü braucht oben rechts keine volle Breite */
@@ -2822,6 +3050,15 @@ st.markdown(
     .kennzahl-label {
         display: block; font-size: .7rem; color: var(--text-mild);
         text-transform: uppercase; letter-spacing: .03em;
+    }
+
+    /* Am großen Bildschirm: Formulare nicht über die ganze Monitorbreite ziehen.
+       Eingabefelder über 1800 px Breite sind schwer zu überblicken; Tabellen
+       bleiben trotzdem breit genug. */
+    @media (min-width: 1400px) {
+        div[data-testid="stAppViewContainer"] .block-container {
+            max-width: 1360px; margin-left: auto; margin-right: auto;
+        }
     }
 
     /* Sehr schmale Geräte */
@@ -3074,8 +3311,16 @@ def letzte_buchung_kunde_projekt(name: str) -> tuple:
             "" if projekt in ("nan", "None") else projekt)
 
 
-def vorauswahl_index(optionen: list, wert: str) -> int:
-    """Index der Vorbelegung in einer Auswahlliste; 0, wenn nicht enthalten."""
+def vorauswahl_index(optionen: list, wert: str, widget_key: str = "") -> int:
+    """Index der Vorbelegung in einer Auswahlliste; 0, wenn nicht enthalten.
+
+    Existiert der Widget-Schlüssel bereits im Sitzungszustand, bestimmt dieser den
+    Wert. Ein zusätzlicher Startindex würde dann die gelbe Streamlit-Warnung
+    "created with a default value but also had its value set via the Session
+    State API" auslösen – deshalb in diesem Fall 0 (der neutrale Standard).
+    """
+    if widget_key and widget_key in st.session_state:
+        return 0
     return optionen.index(wert) if wert and wert in optionen else 0
 
 
@@ -3321,13 +3566,13 @@ if st.session_state.role == "Mitarbeiter":
                         letzter_kunde, letztes_projekt = letzte_buchung_kunde_projekt(benutzer)
                         kdf = aktive_kunden_df(); kopt = ["__KEINER__"] + (kdf["Kunden-ID"].astype(str).tolist() if not kdf.empty else [])
                         kunde_live_id = st.selectbox(t("Kunde", "Customer"), kopt,
-                                                     index=vorauswahl_index(kopt, letzter_kunde),
+                                                     index=vorauswahl_index(kopt, letzter_kunde, "live_kunde"),
                                                      format_func=lambda x: t("Kein Kunde", "No customer") if x == "__KEINER__" else kunden_label(x), key="live_kunde")
                         if kunde_live_id == "__KEINER__": kunde_live_id = ""
                         popt = projekt_optionen_fuer_kunde(kunde_live_id)
                         projekt_widget_normalisieren("live_projekt_id", popt)
                         projekt_live_id = st.selectbox(t("Projekt (optional)", "Project (optional)"), popt,
-                                                       index=vorauswahl_index(popt, letztes_projekt),
+                                                       index=vorauswahl_index(popt, letztes_projekt, "live_projekt_id"),
                                                        format_func=lambda x: t("— ohne Projekt —", "— no project —") if x == "__KEINER__" else projekt_label_id(x), key="live_projekt_id")
                         if projekt_live_id == "__KEINER__": projekt_live_id = ""
                         projekt_live_name = projekt_label_id(projekt_live_id) if projekt_live_id else ""
@@ -3399,6 +3644,26 @@ if st.session_state.role == "Mitarbeiter":
             st.markdown(f"<div class='badge badge-rot'>⚠️ {fehler}</div>", unsafe_allow_html=True)
             vorschau_ok = False
 
+        # Kunde und Projekt stehen SICHTBAR über dem Aufklappbereich: Sie sind mit der
+        # letzten Buchung vorbelegt. Versteckt würde, wer heute woanders war, still
+        # auf den falschen Kunden buchen – ohne es je zu bemerken.
+        m_kunde_id, m_projekt_id, m_projekt_name = "", "", ""
+        if B["projekt_aktiv"] and kunden_projekte_aktiv():
+            kdf = aktive_kunden_df(); kopt = ["__KEINER__"] + (kdf["Kunden-ID"].astype(str).tolist() if not kdf.empty else [])
+            letzter_kunde_m, letztes_projekt_m = letzte_buchung_kunde_projekt(benutzer)
+            kp1, kp2 = st.columns(2)
+            m_kunde_id = kp1.selectbox(t("Kunde", "Customer"), kopt,
+                                       index=vorauswahl_index(kopt, letzter_kunde_m, "ma_kunde"),
+                                       format_func=lambda x: t("Kein Kunde", "No customer") if x == "__KEINER__" else kunden_label(x), key="ma_kunde")
+            if m_kunde_id == "__KEINER__": m_kunde_id = ""
+            popt = projekt_optionen_fuer_kunde(m_kunde_id)
+            projekt_widget_normalisieren("ma_projekt_id", popt)
+            m_projekt_id = kp2.selectbox(t("Projekt (optional)", "Project (optional)"), popt,
+                                         index=vorauswahl_index(popt, letztes_projekt_m, "ma_projekt_id"),
+                                         format_func=lambda x: t("— ohne Projekt —", "— no project —") if x == "__KEINER__" else projekt_label_id(x), key="ma_projekt_id")
+            if m_projekt_id == "__KEINER__": m_projekt_id = ""
+            m_projekt_name = projekt_name_id(m_projekt_id) if m_projekt_id else ""
+
         with st.expander(t("Weitere Angaben", "More details")):
             m_pause = st.number_input(t("Pause (Min.)", "Break (min)"), 0, 480, int(vorgabe_pause), 5,
                                       key="ma_pause",
@@ -3406,24 +3671,8 @@ if st.session_state.role == "Mitarbeiter":
                                              "The statutory minimum break is deducted automatically."))
             m_kategorie = st.selectbox(t("Tätigkeit", "Activity"), kategorien(),
                                        format_func=wert_label, key="ma_kat")
-            m_kunde_id, m_projekt_id, m_projekt_name = "", "", ""
-            if B["projekt_aktiv"]:
-                if kunden_projekte_aktiv():
-                    kdf = aktive_kunden_df(); kopt = ["__KEINER__"] + (kdf["Kunden-ID"].astype(str).tolist() if not kdf.empty else [])
-                    letzter_kunde_m, letztes_projekt_m = letzte_buchung_kunde_projekt(benutzer)
-                    m_kunde_id = st.selectbox(t("Kunde", "Customer"), kopt,
-                                              index=vorauswahl_index(kopt, letzter_kunde_m),
-                                              format_func=lambda x: t("Kein Kunde", "No customer") if x == "__KEINER__" else kunden_label(x), key="ma_kunde")
-                    if m_kunde_id == "__KEINER__": m_kunde_id = ""
-                    popt = projekt_optionen_fuer_kunde(m_kunde_id)
-                    projekt_widget_normalisieren("ma_projekt_id", popt)
-                    m_projekt_id = st.selectbox(t("Projekt (optional)", "Project (optional)"), popt,
-                                                index=vorauswahl_index(popt, letztes_projekt_m),
-                                                format_func=lambda x: t("— ohne Projekt —", "— no project —") if x == "__KEINER__" else projekt_label_id(x), key="ma_projekt_id")
-                    if m_projekt_id == "__KEINER__": m_projekt_id = ""
-                    m_projekt_name = projekt_name_id(m_projekt_id) if m_projekt_id else ""
-                else:
-                    m_projekt_name = st.text_input(projekt_label(), key="ma_projekt")
+            if B["projekt_aktiv"] and not kunden_projekte_aktiv():
+                m_projekt_name = st.text_input(projekt_label(), key="ma_projekt")
             m_notiz = st.text_input(t("Notiz", "Note"), key="ma_notiz")
 
         if st.button(t("💾 Speichern", "💾 Save"), use_container_width=True, type="primary",
@@ -3657,6 +3906,35 @@ if st.session_state.role == "Mitarbeiter":
                         st.caption(t("Änderungen nur über die Leitung.",
                                      "Changes via management only."))
                         tabelle(gesperrt_zeilen.drop(columns=["ID"]))
+
+        # Transparenz: Mitarbeitende sehen, wenn jemand anderes ihre Zeiten
+        # geändert hat. Eigene Änderungen werden nicht angezeigt – die kennt man.
+        fremde_aenderungen = protokoll_laden(benutzer, date.today() - timedelta(days=60),
+                                             date.today(), grenze=200)
+        if not fremde_aenderungen.empty:
+            fremde_aenderungen = fremde_aenderungen[
+                (fremde_aenderungen["Benutzer"].astype(str) != str(st.session_state.get("username")))
+                & (fremde_aenderungen["Aktion"].isin(["Geändert", "Gelöscht", "Angelegt"]))
+            ]
+        if not fremde_aenderungen.empty:
+            with st.expander(t(f"🔔 Von der Leitung geändert ({len(fremde_aenderungen)})",
+                               f"🔔 Changed by management ({len(fremde_aenderungen)})")):
+                import html as _html
+                for _, eintrag in fremde_aenderungen.head(20).iterrows():
+                    # Werte stammen aus Nutzereingaben (z. B. Notizen) – vor der
+                    # HTML-Ausgabe maskieren, sonst ließe sich Markup einschleusen
+                    eintrag = eintrag.apply(lambda w: _html.escape(str(w)) if pd.notna(w) else "")
+                    zeit = pd.to_datetime(eintrag["Zeitpunkt"], errors="coerce")
+                    zeit_text = zeit.strftime(DATUMSFORMAT + " %H:%M") if pd.notna(zeit) else ""
+                    if eintrag["Aktion"] == "Geändert":
+                        text = (f"**{eintrag['Feld']}**: {eintrag['Alter Wert'] or '—'} → "
+                                f"{eintrag['Neuer Wert'] or '—'}")
+                    elif eintrag["Aktion"] == "Gelöscht":
+                        text = t(f"Gelöscht: {eintrag['Alter Wert']}", f"Deleted: {eintrag['Alter Wert']}")
+                    else:
+                        text = t(f"Eingetragen: {eintrag['Neuer Wert']}", f"Added: {eintrag['Neuer Wert']}")
+                    st.markdown(f"<small>{zeit_text} · {eintrag['Benutzer']}</small><br>{text}",
+                                unsafe_allow_html=True)
 
     # ================= Abwesenheit =================
     with tab_abwesenheit:
@@ -4519,6 +4797,54 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                         if c_del2.button("Abbrechen", key=f"sys_zeit_delete_cancel_{ziel_id}", use_container_width=True):
                             st.session_state[f"sys_zeit_delete_confirm_{ziel_id}"] = False
                             st.rerun()
+
+        # ---------- Änderungsprotokoll ----------
+        with st.expander(t("📜 Änderungsprotokoll", "📜 Change log")):
+            st.caption(t(
+                "Jede Änderung an Arbeitszeiten und Abwesenheiten mit altem und neuem Wert. "
+                "Einträge können nicht geändert oder gelöscht werden.",
+                "Every change to working times and absences with old and new value. "
+                "Entries cannot be edited or deleted."))
+            pr1, pr2, pr3 = st.columns([2, 1, 1])
+            pr_person = pr1.selectbox(
+                t("Mitarbeiter", "Employee"), ["__ALLE__"] + aktive_mitarbeiter(),
+                format_func=lambda x: t("Alle", "All") if x == "__ALLE__" else x,
+                key="protokoll_person")
+            pr_von = pr2.date_input(t("Von", "From"), date.today() - timedelta(days=30),
+                                    format=DATUMSFORMAT_UI, key="protokoll_von")
+            pr_bis = pr3.date_input(t("Bis", "To"), date.today(),
+                                    format=DATUMSFORMAT_UI, key="protokoll_bis")
+            pr_aktionen = st.multiselect(
+                t("Aktion", "Action"),
+                ["Angelegt", "Geändert", "Gelöscht", "Eingestempelt", "Ausgestempelt"],
+                default=["Angelegt", "Geändert", "Gelöscht"],
+                key="protokoll_aktionen",
+                help=t("Ein- und Ausstempeln sind normale Vorgänge und standardmäßig ausgeblendet.",
+                       "Clocking in and out are normal actions and hidden by default."))
+
+            protokoll = protokoll_laden(None if pr_person == "__ALLE__" else pr_person,
+                                        pr_von, pr_bis)
+            if pr_aktionen and not protokoll.empty:
+                protokoll = protokoll[protokoll["Aktion"].isin(pr_aktionen)]
+
+            if protokoll.empty:
+                st.info(t("Keine Einträge im gewählten Zeitraum.", "No entries in the selected period."))
+            else:
+                anzeige = protokoll.drop(columns=["Protokoll-ID", "Datensatz-ID"]).copy()
+                anzeige["Zeitpunkt"] = pd.to_datetime(anzeige["Zeitpunkt"], errors="coerce").dt.strftime(
+                    DATUMSFORMAT + " %H:%M")
+                st.dataframe(anzeige, use_container_width=True, hide_index=True,
+                             column_config={
+                                 "Zeitpunkt": st.column_config.TextColumn(width="small"),
+                                 "Aktion": st.column_config.TextColumn(width="small"),
+                                 "Feld": st.column_config.TextColumn(width="small"),
+                             })
+                st.caption(t(f"{len(protokoll)} Einträge", f"{len(protokoll)} entries"))
+                st.download_button(
+                    t("📥 Protokoll als CSV", "📥 Log as CSV"),
+                    data=protokoll.to_csv(index=False, sep=";").encode("utf-8-sig"),
+                    file_name=f"aenderungsprotokoll_{pr_von:%Y%m%d}_{pr_bis:%Y%m%d}.csv",
+                    mime="text/csv", key="protokoll_export")
 
     # ---------------- Auswertungen ----------------
     with tab_auswertung:

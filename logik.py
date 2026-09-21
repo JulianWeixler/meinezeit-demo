@@ -190,7 +190,12 @@ def berechne_arbeitszeit(kommen: time, gehen: time, regeln: Regeln = STANDARD_RE
     basis = date(2000, 1, 1)
     t_kommen = datetime.combine(basis, kommen)
     t_gehen = datetime.combine(basis, gehen)
-    if t_gehen <= t_kommen:
+    # Gleiche Zeiten sind KEINE Schicht über Mitternacht, sondern null Stunden.
+    # Live-Stempeln speichert minutengenau: Wer versehentlich "Start" und in
+    # derselben Minute "Feierabend" tippt, bekäme sonst 23,25 Stunden gebucht.
+    if t_gehen == t_kommen:
+        return 0.0, 0, 0.0
+    if t_gehen < t_kommen:
         if not regeln.nachtschicht_erlaubt:
             raise ZeitFehler("gehen_vor_kommen", "Die Gehen-Zeit muss nach der Kommen-Zeit liegen.")
         t_gehen += timedelta(days=1)
@@ -236,7 +241,9 @@ def wochenplan_soll(arbeitstag: bool, von, bis, pause_minuten: float = 0) -> flo
     basis = date(2000, 1, 1)
     beginn_dt = datetime.combine(basis, start)
     ende_dt = datetime.combine(basis, ende)
-    if ende_dt <= beginn_dt:                       # Schicht über Mitternacht
+    if ende_dt == beginn_dt:                       # gleiche Zeit = kein Arbeitstag
+        return 0.0
+    if ende_dt < beginn_dt:                        # Schicht über Mitternacht
         ende_dt += timedelta(days=1)
     brutto = (ende_dt - beginn_dt).total_seconds() / 3600.0
     netto = brutto - max(0.0, float(pause_minuten or 0)) / 60.0
@@ -269,7 +276,9 @@ def _zeitfenster(buchung: Buchung, nachtschicht_erlaubt: bool = True):
     if buchung.gehen is None:
         return start, None
     ende = datetime.combine(buchung.datum, buchung.gehen)
-    if ende <= start and nachtschicht_erlaubt:
+    # Gleiche Zeiten ergeben ein leeres Fenster statt eines ganzen Tages –
+    # sonst würde eine versehentliche Null-Buchung alles blockieren
+    if ende < start and nachtschicht_erlaubt:
         ende += timedelta(days=1)
     return start, ende
 
@@ -284,12 +293,17 @@ def ueberschneidung(neu: Buchung, bestehende: list, nachtschicht_erlaubt: bool =
     neu_start, neu_ende = _zeitfenster(neu, nachtschicht_erlaubt)
     if neu_start is None:
         return None
+    # Eine Buchung ohne Dauer belegt keine Zeit und kann nichts überschneiden
+    if neu_ende is not None and neu_ende == neu_start:
+        return None
 
     for alt in bestehende or []:
         if alt.id == neu.id:
             continue
         alt_start, alt_ende = _zeitfenster(alt, nachtschicht_erlaubt)
         if alt_start is None:
+            continue
+        if alt_ende is not None and alt_ende == alt_start:
             continue
         # Offene Buchungen: alles ab ihrem Beginn gilt als belegt
         offen_alt = alt_ende is None
