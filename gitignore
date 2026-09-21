@@ -1,0 +1,39 @@
+# ------------------------------------------------------------
+# Niemals ins Repository: Daten, Passwörter, Geheimnisse
+# ------------------------------------------------------------
+# Datenbanken (enthalten Namen, Arbeitszeiten, Passwort-Hashes)
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+daten/*
+!daten/.gitkeep
+backups/*
+!backups/.gitkeep
+runtime/data/*
+runtime/backups/*
+!runtime/data/.gitkeep
+!runtime/backups/.gitkeep
+
+# Einmal-Passwort des Systemadministrators (Klartext!)
+systemadmin_initial.txt
+
+# Protokolle und Exporte
+*.log
+*.csv
+*.xlsx
+
+# Geheimnisse und Zugangsdaten
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+
+# Python / Systemdateien
+.venv/
+venv/
+__pycache__/
+*.pyc
+.DS_Store
+.pytest_cache/
