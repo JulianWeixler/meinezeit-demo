@@ -1796,34 +1796,67 @@ def standard_arbeitszeitarten(branche_key: str | None = None) -> list[str]:
     return [de for de, _ in BRANCHEN.get(key, BRANCHEN["Allgemein / Büro"])["kategorien"]]
 
 
-def standard_abwesenheitsarten() -> list[tuple[str, str, bool]]:
+def standard_abwesenheitsarten_fuer_mitarbeiter() -> list[tuple[str, str, bool]]:
     return list(ABWESENHEITSARTEN)
 
 
-def arbeitszeitarten() -> list[str]:
-    """Vom Systemadmin ausgerollte und vom Kunden anpassbare Arbeitszeitarten."""
+def arbeitszeitarten_config() -> list[dict]:
+    """Alle Arbeitszeitarten inklusive Aktiv- und Mitarbeiterfreigabe."""
     werte = st.session_state.get("config", {}).get("arbeitszeitarten")
     if not isinstance(werte, list) or not werte:
-        return standard_arbeitszeitarten()
-    return [str(x).strip() for x in werte if str(x).strip()]
-
-
-def abwesenheitsarten() -> list[tuple[str, str, bool]]:
-    """Vom Systemadmin ausgerollte und vom Kunden anpassbare Abwesenheitsarten."""
-    werte = st.session_state.get("config", {}).get("abwesenheitsarten")
-    if not isinstance(werte, list) or not werte:
-        return standard_abwesenheitsarten()
+        werte = standard_arbeitszeitarten()
     result = []
     for item in werte:
         if isinstance(item, dict):
             name = str(item.get("name", "")).strip()
-            erlaubt = bool(item.get("stundenweise", False))
+            aktiv = bool(item.get("aktiv", True))
+            ma = bool(item.get("mitarbeiter_buchbar", True))
         else:
-            name = str(item).strip()
-            erlaubt = False
+            name, aktiv, ma = str(item).strip(), True, True
         if name:
-            result.append((name, name, erlaubt))
-    return result or standard_abwesenheitsarten()
+            result.append({"name": name, "aktiv": aktiv, "mitarbeiter_buchbar": ma})
+    return result
+
+
+def arbeitszeitarten(aktiv_only: bool = True, mitarbeiter_only: bool = False) -> list[str]:
+    result = []
+    for item in arbeitszeitarten_config():
+        if aktiv_only and not item["aktiv"]:
+            continue
+        if mitarbeiter_only and not item["mitarbeiter_buchbar"]:
+            continue
+        result.append(item["name"])
+    return result
+
+
+def abwesenheitsarten_config() -> list[dict]:
+    """Alle Abwesenheitsarten inklusive Stunden-, Aktiv- und Mitarbeiterfreigabe."""
+    werte = st.session_state.get("config", {}).get("abwesenheitsarten")
+    if not isinstance(werte, list) or not werte:
+        werte = [{"name": de, "stundenweise": erlaubt} for de, _, erlaubt in ABWESENHEITSARTEN]
+    result = []
+    for item in werte:
+        if isinstance(item, dict):
+            name = str(item.get("name", "")).strip()
+            std = bool(item.get("stundenweise", False))
+            aktiv = bool(item.get("aktiv", True))
+            ma = bool(item.get("mitarbeiter_buchbar", True))
+        else:
+            name, std, aktiv, ma = str(item).strip(), False, True, True
+        if name:
+            result.append({"name": name, "stundenweise": std, "aktiv": aktiv, "mitarbeiter_buchbar": ma})
+    return result
+
+
+def abwesenheitsarten(aktiv_only: bool = True, mitarbeiter_only: bool = False) -> list[tuple[str, str, bool]]:
+    result = []
+    for item in abwesenheitsarten_config():
+        if aktiv_only and not item["aktiv"]:
+            continue
+        if mitarbeiter_only and not item["mitarbeiter_buchbar"]:
+            continue
+        result.append((item["name"], item["name"], item["stundenweise"]))
+    return result
 
 
 def arbeitszeitart_gebucht(name: str) -> bool:
@@ -1840,11 +1873,19 @@ def konfig_arten_nachziehen() -> None:
     """Migriert ältere Konfigurationen auf die branchenspezifischen Listen."""
     cfgdata = st.session_state.setdefault("config", {})
     if not isinstance(cfgdata.get("arbeitszeitarten"), list) or not cfgdata.get("arbeitszeitarten"):
-        cfgdata["arbeitszeitarten"] = standard_arbeitszeitarten(str(cfgdata.get("branche", "Allgemein / Büro")))
+        cfgdata["arbeitszeitarten"] = [
+            {"name": name, "aktiv": True, "mitarbeiter_buchbar": True}
+            for name in standard_arbeitszeitarten(str(cfgdata.get("branche", "Allgemein / Büro")))
+        ]
+    else:
+        cfgdata["arbeitszeitarten"] = arbeitszeitarten_config()
     if not isinstance(cfgdata.get("abwesenheitsarten"), list) or not cfgdata.get("abwesenheitsarten"):
         cfgdata["abwesenheitsarten"] = [
-            {"name": de, "stundenweise": erlaubt} for de, _, erlaubt in ABWESENHEITSARTEN
+            {"name": de, "stundenweise": erlaubt, "aktiv": True, "mitarbeiter_buchbar": True}
+            for de, _, erlaubt in ABWESENHEITSARTEN
         ]
+    else:
+        cfgdata["abwesenheitsarten"] = abwesenheitsarten_config()
 
 
 
@@ -2135,9 +2176,17 @@ def zeit_mit_kunden_projekten(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def kategorien() -> list[str]:
-    """Intern gespeicherte (deutsche) Kategoriewerte der aktuellen Branche."""
-    return arbeitszeitarten()
+def kategorien_fuer_mitarbeiter() -> list[str]:
+    """Aktive Arbeitszeitarten für Leitung/Admin."""
+    return arbeitszeitarten(True, False)
+
+
+def kategorien_fuer_mitarbeiter() -> list[str]:
+    return arbeitszeitarten(True, True)
+
+
+def abwesenheitsarten_fuer_mitarbeiter() -> list[tuple[str, str, bool]]:
+    return abwesenheitsarten(True, True)
 
 
 
@@ -3812,9 +3861,9 @@ if st.session_state.role == "Mitarbeiter":
                 st.markdown(f"<div class='badge badge-grau'>⚪ "
                             f"{t('Nicht eingestempelt', 'Not clocked in')}</div>",
                             unsafe_allow_html=True)
-                kategorie_live = kategorien()[0]
-                if len(kategorien()) > 1:
-                    kategorie_live = st.selectbox(t("Tätigkeit", "Activity"), kategorien(),
+                kategorie_live = kategorien_fuer_mitarbeiter()[0]
+                if len(kategorien_fuer_mitarbeiter()) > 1:
+                    kategorie_live = st.selectbox(t("Tätigkeit", "Activity"), kategorien_fuer_mitarbeiter(),
                                                   format_func=wert_label, key="live_kat")
                 kunde_live_id, projekt_live_id, projekt_live_name = "", "", ""
                 if B["projekt_aktiv"]:
@@ -3926,7 +3975,7 @@ if st.session_state.role == "Mitarbeiter":
                                       key="ma_pause",
                                       help=t("Die gesetzliche Mindestpause wird automatisch abgezogen.",
                                              "The statutory minimum break is deducted automatically."))
-            m_kategorie = st.selectbox(t("Tätigkeit", "Activity"), kategorien(),
+            m_kategorie = st.selectbox(t("Tätigkeit", "Activity"), kategorien_fuer_mitarbeiter(),
                                        format_func=wert_label, key="ma_kat")
             if B["projekt_aktiv"] and not kunden_projekte_aktiv():
                 m_projekt_name = st.text_input(projekt_label(), key="ma_projekt")
@@ -4042,7 +4091,7 @@ if st.session_state.role == "Mitarbeiter":
                                 {"nan": "", "<NA>": "", "None": ""})
                     raster["Löschen"] = False
                     kategorie_optionen = list(dict.fromkeys(
-                        kategorien() + [k for k in raster["Kategorie"].unique() if k]))
+                        kategorien_fuer_mitarbeiter() + [k for k in raster["Kategorie"].unique() if k]))
 
                     # Auf dem Telefon sind neun Spalten unbenutzbar. Standard ist daher
                     # die kurze Ansicht; die übrigen Felder lassen sich zuschalten.
@@ -4255,9 +4304,14 @@ if st.session_state.role == "Mitarbeiter":
                              else t("Stundenweise", "Hourly"),
                              horizontal=True, key="abw_modus")
             # Dritter Wert des Tupels sagt, ob die Art stundenweise erlaubt ist
-            moegliche_arten = [a for a in abwesenheitsarten() if modus == "Tage" or a[2]]
-            art = st.selectbox(t("Grund", "Reason"), [a[0] for a in moegliche_arten],
-                               format_func=wert_label, key="abw_art")
+            moegliche_arten = [a for a in abwesenheitsarten_fuer_mitarbeiter() if modus == "Tage" or a[2]]
+            if moegliche_arten:
+                art = st.selectbox(t("Grund", "Reason"), [a[0] for a in moegliche_arten],
+                                   format_func=wert_label, key="abw_art")
+            else:
+                art = ""
+                st.info(t("Für diese Antragsart ist aktuell kein Abwesenheitsgrund für Mitarbeitende freigegeben.",
+                          "No absence reason is currently enabled for employees for this request type."))
             if modus == "Tage":
                 d1, d2 = st.columns(2)
                 u_start = d1.date_input(t("Von", "From"), heute, format=DATUMSFORMAT_UI,
@@ -6777,95 +6831,112 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                     "The types were rolled out by the system administrator for this company's industry. "
                     "Unused types can be changed by the KeyUser; already booked types are locked."))
 
-            az = arbeitszeitarten()
+            st.caption(t(
+                "Deaktivierte Arten bleiben in Historie und Auswertungen erhalten, stehen aber nicht mehr für neue Buchungen zur Verfügung. "
+                "Mit „Mitarbeiter buchbar“ steuern Sie, ob Mitarbeitende die Art selbst auswählen dürfen.",
+                "Deactivated types remain in history and reports but cannot be used for new entries. "
+                "“Employee bookable” controls whether employees may select the type themselves."))
+
+            az_cfg = arbeitszeitarten_config()
             st.markdown(f"**{t('Arbeitszeitarten', 'Working-time types')}**")
+            h1, h2, h3, h4 = st.columns([5, 1.2, 2.2, 1.0])
+            h1.caption(t("Name", "Name")); h2.caption(t("Aktiv", "Active"))
+            h3.caption(t("Mitarbeiter buchbar", "Employee bookable")); h4.caption(t("Löschen", "Delete"))
             neue_az = []
-            for nr, wert in enumerate(az):
-                gebucht = arbeitszeitart_gebucht(wert)
-                c1, c2, c3 = st.columns([6, 2, 1])
-                neu_wert = c1.text_input(
-                    f"{t('Bezeichnung', 'Name')} {nr + 1}", wert, disabled=gebucht,
-                    key=f"az_name_{nr}")
+            for nr, item in enumerate(az_cfg):
+                wert, gebucht = item["name"], arbeitszeitart_gebucht(item["name"])
+                c1, c2, c3, c4 = st.columns([5, 1.2, 2.2, 1.0])
+                name = c1.text_input(t("Name", "Name"), wert, disabled=gebucht, label_visibility="collapsed", key=f"az_name_{nr}")
+                aktiv = c2.checkbox(t("Aktiv", "Active"), item["aktiv"], label_visibility="collapsed", key=f"az_active_{nr}")
+                ma = c3.checkbox(t("Mitarbeiter buchbar", "Employee bookable"), item["mitarbeiter_buchbar"],
+                                 label_visibility="collapsed", key=f"az_ma_{nr}")
+                delete = c4.checkbox(t("Löschen", "Delete"), disabled=gebucht, label_visibility="collapsed", key=f"az_del_{nr}")
+                if not delete and name.strip():
+                    neue_az.append({"name": name.strip(), "aktiv": bool(aktiv), "mitarbeiter_buchbar": bool(ma)})
                 if gebucht:
-                    c2.caption(t("bereits gebucht", "already booked"))
-                loeschen = c3.checkbox(t("Löschen", "Delete"), disabled=gebucht, key=f"az_del_{nr}")
-                if not loeschen and neu_wert.strip():
-                    neue_az.append(neu_wert.strip())
-            c1, c2 = st.columns([6, 2])
+                    c1.caption(t("verwendet – Name/Löschen gesperrt", "used – name/delete locked"))
+
+            c1, c2, c3, c4 = st.columns([5, 1.2, 2.2, 1.0])
             az_runde = st.session_state.get("_az_neu_runde", 0)
-            neue_az_bezeichnung = c1.text_input(t("Neue Arbeitszeitart", "New working-time type"),
-                                                key=f"az_neu_{az_runde}")
-            if c2.button(t("➕ Hinzufügen", "➕ Add"), key="az_hinzufuegen"):
-                name = neue_az_bezeichnung.strip()
+            az_name = c1.text_input(t("Neue Arbeitszeitart", "New working-time type"), label_visibility="collapsed",
+                                    placeholder=t("Neue Arbeitszeitart", "New working-time type"), key=f"az_neu_{az_runde}")
+            az_active = c2.checkbox(t("Aktiv", "Active"), True, label_visibility="collapsed", key=f"az_neu_active_{az_runde}")
+            az_ma = c3.checkbox(t("Mitarbeiter buchbar", "Employee bookable"), True, label_visibility="collapsed", key=f"az_neu_ma_{az_runde}")
+            if c4.button("➕", help=t("Hinzufügen", "Add"), key="az_hinzufuegen", use_container_width=True):
+                name = az_name.strip()
                 if not name:
                     st.error(t("Bitte eine Bezeichnung eingeben.", "Please enter a name."))
-                elif name in neue_az:
+                elif name in {x["name"] for x in neue_az}:
                     st.error(t("Diese Arbeitszeitart ist bereits vorhanden.", "This working-time type already exists."))
                 else:
-                    neue_az.append(name)
+                    neue_az.append({"name": name, "aktiv": bool(az_active), "mitarbeiter_buchbar": bool(az_ma)})
                     st.session_state.config["arbeitszeitarten"] = neue_az
                     einstellungen_speichern(st.session_state.config)
                     st.session_state["_az_neu_runde"] = az_runde + 1
-                    melde("Arbeitszeitart hinzugefügt.", "Working-time type added.", "➕")
-                    st.rerun()
+                    melde("Arbeitszeitart hinzugefügt.", "Working-time type added.", "➕"); st.rerun()
 
-            st.markdown(f"**{t('Abwesenheitsgründe', 'Absence reasons')}**")
-            aw = abwesenheitsarten()
+            aw_cfg = abwesenheitsarten_config()
+            st.markdown(f"**{t('Abwesenheitsarten', 'Absence types')}**")
+            h1, h2, h3, h4, h5 = st.columns([4.5, 1.8, 1.2, 2.2, 1.0])
+            h1.caption(t("Name", "Name")); h2.caption(t("Stundenweise", "Hourly")); h3.caption(t("Aktiv", "Active"))
+            h4.caption(t("Mitarbeiter buchbar", "Employee bookable")); h5.caption(t("Löschen", "Delete"))
             neue_aw = []
-            for nr, (wert, _, stundenweise) in enumerate(aw):
-                gebucht = abwesenheitsart_gebucht(wert)
-                c1, c2, c3 = st.columns([5, 2, 1])
-                neu_wert = c1.text_input(
-                    f"{t('Bezeichnung', 'Name')} {nr + 1}", wert, disabled=gebucht,
-                    key=f"aw_name_{nr}")
-                neu_stunden = c2.checkbox(
-                    t("Stundenweise", "Hourly allowed"), stundenweise, disabled=gebucht, key=f"aw_std_{nr}")
-                loeschen = c3.checkbox(t("Löschen", "Delete"), disabled=gebucht, key=f"aw_del_{nr}")
-                if not loeschen and neu_wert.strip():
-                    neue_aw.append({"name": neu_wert.strip(), "stundenweise": bool(neu_stunden)})
+            for nr, item in enumerate(aw_cfg):
+                wert, gebucht = item["name"], abwesenheitsart_gebucht(item["name"])
+                c1, c2, c3, c4, c5 = st.columns([4.5, 1.8, 1.2, 2.2, 1.0])
+                name = c1.text_input(t("Name", "Name"), wert, disabled=gebucht, label_visibility="collapsed", key=f"aw_name_{nr}")
+                std = c2.checkbox(t("Stundenweise möglich", "Hourly allowed"), item["stundenweise"],
+                                  label_visibility="collapsed", key=f"aw_std_{nr}")
+                aktiv = c3.checkbox(t("Aktiv", "Active"), item["aktiv"], label_visibility="collapsed", key=f"aw_active_{nr}")
+                ma = c4.checkbox(t("Mitarbeiter buchbar", "Employee bookable"), item["mitarbeiter_buchbar"],
+                                 label_visibility="collapsed", key=f"aw_ma_{nr}")
+                delete = c5.checkbox(t("Löschen", "Delete"), disabled=gebucht, label_visibility="collapsed", key=f"aw_del_{nr}")
+                if not delete and name.strip():
+                    neue_aw.append({"name": name.strip(), "stundenweise": bool(std), "aktiv": bool(aktiv), "mitarbeiter_buchbar": bool(ma)})
                 if gebucht:
-                    st.caption(t("Bereits gebucht – gesperrt.", "Already booked – locked."))
-            c1, c2, c3 = st.columns([5, 2, 1])
+                    c1.caption(t("verwendet – Name/Löschen gesperrt", "used – name/delete locked"))
+
+            c1, c2, c3, c4, c5 = st.columns([4.5, 1.8, 1.2, 2.2, 1.0])
             aw_runde = st.session_state.get("_aw_neu_runde", 0)
-            aw_neu = c1.text_input(t("Neuer Abwesenheitsgrund", "New absence reason"),
-                                   key=f"aw_neu_{aw_runde}")
-            aw_neu_std = c2.checkbox(t("Stundenweise möglich", "Hourly allowed"),
-                                     key=f"aw_neu_std_{aw_runde}")
-            if c3.button(t("➕ Hinzufügen", "➕ Add"), key="aw_hinzufuegen"):
-                name = aw_neu.strip()
+            aw_name = c1.text_input(t("Neue Abwesenheitsart", "New absence type"), label_visibility="collapsed",
+                                    placeholder=t("Neue Abwesenheitsart", "New absence type"), key=f"aw_neu_{aw_runde}")
+            aw_std = c2.checkbox(t("Stundenweise möglich", "Hourly allowed"), False, label_visibility="collapsed", key=f"aw_neu_std_{aw_runde}")
+            aw_active = c3.checkbox(t("Aktiv", "Active"), True, label_visibility="collapsed", key=f"aw_neu_active_{aw_runde}")
+            aw_ma = c4.checkbox(t("Mitarbeiter buchbar", "Employee bookable"), True, label_visibility="collapsed", key=f"aw_neu_ma_{aw_runde}")
+            if c5.button("➕", help=t("Hinzufügen", "Add"), key="aw_hinzufuegen", use_container_width=True):
+                name = aw_name.strip()
                 if not name:
                     st.error(t("Bitte eine Bezeichnung eingeben.", "Please enter a name."))
-                elif any(x["name"] == name for x in neue_aw):
-                    st.error(t("Dieser Abwesenheitsgrund ist bereits vorhanden.", "This absence reason already exists."))
+                elif name in {x["name"] for x in neue_aw}:
+                    st.error(t("Diese Abwesenheitsart ist bereits vorhanden.", "This absence type already exists."))
                 else:
-                    neue_aw.append({"name": name, "stundenweise": bool(aw_neu_std)})
+                    neue_aw.append({"name": name, "stundenweise": bool(aw_std), "aktiv": bool(aw_active), "mitarbeiter_buchbar": bool(aw_ma)})
                     st.session_state.config["abwesenheitsarten"] = neue_aw
                     einstellungen_speichern(st.session_state.config)
                     st.session_state["_aw_neu_runde"] = aw_runde + 1
-                    melde("Abwesenheitsgrund hinzugefügt.", "Absence reason added.", "➕")
-                    st.rerun()
+                    melde("Abwesenheitsart hinzugefügt.", "Absence type added.", "➕"); st.rerun()
 
             if st.button(t("💾 Arten speichern", "💾 Save types"), key="arten_speichern", use_container_width=True):
-                # Bereits gebuchte Arten dürfen weder umbenannt noch gelöscht werden.
-                gebuchte_az = {x for x in az if arbeitszeitart_gebucht(x)}
-                gebuchte_aw = {x[0] for x in aw if abwesenheitsart_gebucht(x[0])}
-                if not gebuchte_az.issubset(set(neue_az)):
+                gebuchte_az = {x["name"] for x in az_cfg if arbeitszeitart_gebucht(x["name"])}
+                gebuchte_aw = {x["name"] for x in aw_cfg if abwesenheitsart_gebucht(x["name"])}
+                if not gebuchte_az.issubset({x["name"] for x in neue_az}):
                     st.error(t("Bereits gebuchte Arbeitszeitarten dürfen nicht gelöscht oder umbenannt werden.",
                                "Already booked working-time types cannot be deleted or renamed."))
                 elif not gebuchte_aw.issubset({x["name"] for x in neue_aw}):
-                    st.error(t("Bereits gebuchte Abwesenheitsgründe dürfen nicht gelöscht oder umbenannt werden.",
-                               "Already booked absence reasons cannot be deleted or renamed."))
-                elif len(set(neue_az)) != len(neue_az) or len({x["name"] for x in neue_aw}) != len(neue_aw):
+                    st.error(t("Bereits gebuchte Abwesenheitsarten dürfen nicht gelöscht oder umbenannt werden.",
+                               "Already booked absence types cannot be deleted or renamed."))
+                elif len({x["name"] for x in neue_az}) != len(neue_az) or len({x["name"] for x in neue_aw}) != len(neue_aw):
                     st.error(t("Bezeichnungen müssen eindeutig sein.", "Names must be unique."))
                 elif not neue_az or not neue_aw:
-                    st.error(t("Es muss mindestens eine Arbeitszeitart und einen Abwesenheitsgrund geben.",
-                               "At least one working-time type and one absence reason are required."))
+                    st.error(t("Es muss mindestens eine Arbeitszeitart und eine Abwesenheitsart geben.",
+                               "At least one working-time type and one absence type are required."))
+                elif not any(x["aktiv"] for x in neue_az):
+                    st.error(t("Mindestens eine Arbeitszeitart muss aktiv bleiben.", "At least one working-time type must remain active."))
                 else:
                     st.session_state.config["arbeitszeitarten"] = neue_az
                     st.session_state.config["abwesenheitsarten"] = neue_aw
                     einstellungen_speichern(st.session_state.config)
-                    melde(t("Arbeitszeit- und Abwesenheitsarten gespeichert.", "Working-time and absence types saved."),
-                          t("Working-time and absence types saved.", "Working-time and absence types saved."), "💾")
+                    melde("Arbeitszeit- und Abwesenheitsarten gespeichert.", "Working-time and absence types saved.", "💾")
                     st.rerun()
 
         alte_branche = cfg("branche")
@@ -7093,18 +7164,20 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                     if str(gewaehlte_branche) != str(alte_branche):
                         # Neues Branchen-Grundset ausrollen, bereits gebuchte Arten aber
                         # als historische Werte erhalten, damit bestehende Buchungen lesbar bleiben.
-                        alte_az = arbeitszeitarten()
-                        gebuchte_az = [x for x in alte_az if arbeitszeitart_gebucht(x)]
-                        neue_az = standard_arbeitszeitarten(str(gewaehlte_branche))
+                        alte_az = arbeitszeitarten_config()
+                        gebuchte_az = [x for x in alte_az if arbeitszeitart_gebucht(x["name"])]
+                        neue_az = [{"name": x, "aktiv": True, "mitarbeiter_buchbar": True}
+                                   for x in standard_arbeitszeitarten(str(gewaehlte_branche))]
                         for x in gebuchte_az:
-                            if x not in neue_az:
+                            if x["name"] not in {y["name"] for y in neue_az}:
                                 neue_az.append(x)
-                        alte_aw = abwesenheitsarten()
-                        gebuchte_aw = [x for x in alte_aw if abwesenheitsart_gebucht(x[0])]
-                        neue_aw = [{"name": de, "stundenweise": erlaubt} for de, _, erlaubt in ABWESENHEITSARTEN]
+                        alte_aw = abwesenheitsarten_config()
+                        gebuchte_aw = [x for x in alte_aw if abwesenheitsart_gebucht(x["name"])]
+                        neue_aw = [{"name": de, "stundenweise": erlaubt, "aktiv": True, "mitarbeiter_buchbar": True}
+                                   for de, _, erlaubt in ABWESENHEITSARTEN]
                         for x in gebuchte_aw:
-                            if not any(y["name"] == x[0] for y in neue_aw):
-                                neue_aw.append({"name": x[0], "stundenweise": x[2]})
+                            if x["name"] not in {y["name"] for y in neue_aw}:
+                                neue_aw.append(x)
                         st.session_state.config["arbeitszeitarten"] = neue_az
                         st.session_state.config["abwesenheitsarten"] = neue_aw
                 einstellungen_speichern(st.session_state.config)
