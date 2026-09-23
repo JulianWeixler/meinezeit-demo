@@ -1314,6 +1314,54 @@ def protokoll_laden(mitarbeiter: str | None = None, von: date | None = None,
         return leer
 
 
+SYSTEMPROTOKOLL_TABELLE = "systemprotokoll"
+SYSTEMPROTOKOLL_SPALTEN = ["Ereignis-ID", "Zeitpunkt", "Benutzer", "Rolle", "Aktion", "Bereich", "Objekt", "Ergebnis", "Details"]
+
+
+def systemereignis(aktion: str, bereich: str, objekt: str = "", ergebnis: str = "Erfolgreich",
+                   details: str = "", benutzer: str | None = None, rolle: str | None = None) -> None:
+    """Append-only System-/Sicherheitsereignis; niemals Secrets als Details übergeben."""
+    if not PERSISTENZ:
+        return
+    try:
+        werte = (
+            uuid.uuid4().hex[:16], datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            str(benutzer if benutzer is not None else st.session_state.get("username") or "System")[:120],
+            str(rolle if rolle is not None else st.session_state.get("role") or "")[:80],
+            str(aktion)[:120], str(bereich)[:120], str(objekt)[:200],
+            str(ergebnis)[:80], str(details)[:1000],
+        )
+        with _verbindung() as conn:
+            schema = ", ".join(f'"{x}" TEXT' for x in SYSTEMPROTOKOLL_SPALTEN)
+            cols = ", ".join(f'"{x}"' for x in SYSTEMPROTOKOLL_SPALTEN)
+            conn.execute(f'CREATE TABLE IF NOT EXISTS "{SYSTEMPROTOKOLL_TABELLE}" ({schema})')
+            conn.execute(f'INSERT INTO "{SYSTEMPROTOKOLL_TABELLE}" ({cols}) VALUES ({", ".join("?" for _ in werte)})', werte)
+            conn.commit()
+    except Exception as exc:
+        protokolliere("Systemereignis konnte nicht gespeichert werden", exc, logging.WARNING)
+
+
+def systemprotokoll_laden(von: date | None = None, bis: date | None = None, grenze: int = 5000) -> pd.DataFrame:
+    leer = pd.DataFrame(columns=SYSTEMPROTOKOLL_SPALTEN)
+    if not PERSISTENZ:
+        return leer
+    try:
+        with _verbindung() as conn:
+            if not _tabelle_vorhanden(conn, SYSTEMPROTOKOLL_TABELLE):
+                return leer
+            bed, vals = [], []
+            if von: bed.append('"Zeitpunkt" >= ?'); vals.append(von.strftime("%Y-%m-%d 00:00:00"))
+            if bis: bed.append('"Zeitpunkt" <= ?'); vals.append(bis.strftime("%Y-%m-%d 23:59:59"))
+            sql=f'SELECT * FROM "{SYSTEMPROTOKOLL_TABELLE}"'
+            if bed: sql += " WHERE " + " AND ".join(bed)
+            sql += f' ORDER BY "Zeitpunkt" DESC LIMIT {int(grenze)}'
+            rows=conn.execute(sql, tuple(vals)).fetchall()
+        return pd.DataFrame(rows, columns=SYSTEMPROTOKOLL_SPALTEN)
+    except Exception as exc:
+        protokolliere("Systemprotokoll konnte nicht gelesen werden", exc, logging.WARNING)
+        return leer
+
+
 def speichern(key: str) -> bool:
     """Speichert Änderungen atomar und inkrementell in der konfigurierten Datenbank."""
     # Zwischenspeicher verwerfen, die von dieser Tabelle abhängen
@@ -2176,12 +2224,13 @@ def zeit_mit_kunden_projekten(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def kategorien_fuer_mitarbeiter() -> list[str]:
+def kategorien() -> list[str]:
     """Aktive Arbeitszeitarten für Leitung/Admin."""
     return arbeitszeitarten(True, False)
 
 
 def kategorien_fuer_mitarbeiter() -> list[str]:
+    """Nur aktive und für Mitarbeitende freigegebene Arbeitszeitarten."""
     return arbeitszeitarten(True, True)
 
 
@@ -3028,6 +3077,8 @@ def passwort_setzen(benutzername: str, neues_passwort: str, wechsel_erzwingen: b
     df.loc[maske, "Passwort_wechseln"] = wechsel_erzwingen
     st.session_state.benutzer = df
     speichern("benutzer")
+    systemereignis("Passwort geändert", "Benutzerkonto", objekt=benutzername,
+                   details="Keine Passwort- oder Hashdaten protokolliert.")
 
 
 def sprache_speichern(benutzername: str, sprache: str) -> None:
@@ -3436,6 +3487,8 @@ if not st.session_state.logged_in:
                 with st.spinner(t("Anmeldung wird geprüft …", "Checking credentials …")):
                     konto = pruefe_anmeldung(eingabe_name, eingabe_passwort)
                 if konto is None:
+                    systemereignis("Login fehlgeschlagen", "Authentifizierung", objekt=eingabe_name or "(leer)",
+                                   ergebnis="Fehlgeschlagen", benutzer=eingabe_name or "Unbekannt")
                     gesperrt_neu, gesperrt_bis_neu, _ = _login_sperrstatus(eingabe_name)
                     if gesperrt_neu and gesperrt_bis_neu:
                         st.error(t("Zu viele Fehlversuche. Das Konto ist vorübergehend gesperrt.", "Too many failed attempts. The account is temporarily locked."))
@@ -3461,6 +3514,8 @@ if not st.session_state.logged_in:
                         login_versuche=0,
                         gesperrt_bis=None,
                     )
+                    systemereignis("Login", "Authentifizierung", objekt=konto["Benutzername"],
+                                   benutzer=konto["Benutzername"], rolle=konto["Rolle"])
                     st.rerun()
 
         if st.session_state.benutzer.empty:
@@ -3507,6 +3562,7 @@ if st.session_state.get("passwort_wechseln"):
                     melde("Passwort gespeichert.", "Password saved.")
                     st.rerun()
             if st.button(t("Abmelden", "Sign out"), use_container_width=True):
+                systemereignis("Logout", "Authentifizierung")
                 st.session_state.update(logged_in=False, role=None, user=None, username=None,
                                         ma_id=None, passwort_wechseln=False)
                 st.rerun()
@@ -3586,6 +3642,7 @@ with kopf_rechts:
                     st.rerun()
 
         if st.button(t("🔒 Abmelden", "🔒 Sign out"), use_container_width=True):
+            systemereignis("Logout", "Authentifizierung")
             st.session_state.update(logged_in=False, role=None, user=None, username=None,
                                     ma_id=None, passwort_wechseln=False)
             st.rerun()
@@ -4504,11 +4561,12 @@ elif st.session_state.role == "Systemadministrator" and not st.session_state.get
 
     st.caption("Als Systemadministrator können Sie die Leitungs-/Admin-Ansicht für Support und Administration jederzeit öffnen.")
     if st.button("👥 Leitungs-/Admin-Ansicht öffnen", type="primary", use_container_width=True):
+        systemereignis("Supportzugriff geöffnet", "Systemadministrator", objekt="Leitungs-/Admin-Ansicht")
         st.session_state.systemadmin_adminmodus = True
         st.rerun()
 
-    tab_sys, tab_backup, tab_kunden, tab_sicherheit = st.tabs([
-        "🖥️ System", "💾 Backups", "👤 Kundenkonten", "🔐 Sicherheit"
+    tab_sys, tab_protokoll, tab_backup, tab_kunden, tab_sicherheit = st.tabs([
+        "🖥️ System", "📜 Systemprotokoll", "💾 Backups", "👤 Kundenkonten", "🔐 Sicherheit"
     ])
 
     with tab_sys:
@@ -4549,6 +4607,36 @@ elif st.session_state.role == "Systemadministrator" and not st.session_state.get
 
         st.info("Der Systemadministrator ist für technische Wartung vorgesehen. Kunden arbeiten ausschließlich mit ihren eigenen Leitungs-/Admin-Konten.")
 
+    with tab_protokoll:
+        st.subheader("Systemprotokoll")
+        st.caption("Login-, Sicherheits-, Support- und Administrationsereignisse. Passwörter, Hashes und Diagnosen werden nicht gespeichert.")
+        c1, c2 = st.columns(2)
+        svon = c1.date_input("Von", date.today() - timedelta(days=30), format=DATUMSFORMAT_UI, key="syslog_von")
+        sbis = c2.date_input("Bis", date.today(), format=DATUMSFORMAT_UI, key="syslog_bis")
+        slog = systemprotokoll_laden(svon, sbis)
+        if slog.empty:
+            st.info("Keine Systemereignisse im gewählten Zeitraum.")
+        else:
+            f1, f2, f3 = st.columns(3)
+            users=["Alle"]+sorted(slog["Benutzer"].dropna().astype(str).unique().tolist())
+            areas=["Alle"]+sorted(slog["Bereich"].dropna().astype(str).unique().tolist())
+            acts=["Alle"]+sorted(slog["Aktion"].dropna().astype(str).unique().tolist())
+            fu=f1.selectbox("Benutzer",users,key="syslog_user")
+            fb=f2.selectbox("Bereich",areas,key="syslog_area")
+            fa=f3.selectbox("Aktion",acts,key="syslog_action")
+            gef=slog.copy()
+            if fu!="Alle": gef=gef[gef["Benutzer"]==fu]
+            if fb!="Alle": gef=gef[gef["Bereich"]==fb]
+            if fa!="Alle": gef=gef[gef["Aktion"]==fa]
+            show=gef.drop(columns=["Ereignis-ID"],errors="ignore").copy()
+            show["Zeitpunkt"]=pd.to_datetime(show["Zeitpunkt"],errors="coerce").dt.strftime("%d.%m.%Y %H:%M:%S")
+            st.dataframe(show,use_container_width=True,hide_index=True)
+            st.caption(f"{len(gef)} Ereignisse")
+            st.download_button("📥 Systemprotokoll als CSV",
+                               data=gef.to_csv(index=False,sep=";").encode("utf-8-sig"),
+                               file_name=f"systemprotokoll_{svon:%Y%m%d}_{sbis:%Y%m%d}.csv",
+                               mime="text/csv",use_container_width=True,key="syslog_export")
+
     with tab_backup:
         st.subheader("Backups")
         BACKUP_DIR.mkdir(parents=True, exist_ok=True)
@@ -4557,6 +4645,7 @@ elif st.session_state.role == "Systemadministrator" and not st.session_state.get
             try:
                 ziel = backup_datenbank()
                 if ziel:
+                    systemereignis("Backup erstellt", "Datensicherung", objekt=ziel.name)
                     st.success(f"Backup erstellt: {ziel.name}")
                 else:
                     st.error("Backup konnte nicht erstellt werden.")
@@ -4566,6 +4655,7 @@ elif st.session_state.role == "Systemadministrator" and not st.session_state.get
             if st.button("🧪 Neuestes SQLite-Backup prüfen", use_container_width=True):
                 ok, meldung = backup_integritaet_pruefen(backups[0])
                 if ok:
+                    systemereignis("Backup geprüft", "Datensicherung", objekt=backups[0].name)
                     st.success(f"Backup {backups[0].name}: Integritätsprüfung erfolgreich.")
                 else:
                     st.error(f"Backup {backups[0].name}: {meldung}")
@@ -4591,6 +4681,7 @@ elif st.session_state.role == "Systemadministrator" and not st.session_state.get
         st.warning("Der Systemadministrator sollte ausschließlich für technische Wartung verwendet werden. Kein Kundenmitarbeiter sollte dieses Konto erhalten.")
 
     if st.button("🚪 Abmelden", use_container_width=True):
+        systemereignis("Logout", "Authentifizierung")
         st.session_state.logged_in = False
         st.rerun()
     st.stop()
@@ -4599,6 +4690,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
     systemadmin_vollzugriff = st.session_state.role == "Systemadministrator"
     if systemadmin_vollzugriff:
         if st.button("🛠️ Zur Systemadministrator-Ansicht", use_container_width=True):
+            systemereignis("Supportzugriff beendet", "Systemadministrator", objekt="Leitungs-/Admin-Ansicht")
             st.session_state.systemadmin_adminmodus = False
             st.rerun()
         with st.expander(t("🛠️ Support-Werkzeuge", "🛠️ Support tools"), expanded=False):
