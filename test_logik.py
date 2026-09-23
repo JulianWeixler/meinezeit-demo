@@ -18,6 +18,7 @@ from logik import (
     arbeitstage_zwischen, benutzername_vorschlag, berechne_arbeitszeit, berechne_saldo,
     buss_und_bettag, darf_nachtragen, feiertage, feiertage_benannt, ist_arbeitstag,
     nachtrag_grenze, ostersonntag, parse_zeit, pause_gesetzlich, urlaubskonto,
+    arbeitstage_nach_wochenplan, urlaubsanspruch_eintritt, ist_feiertag,
     abwesend_an, abwesenheits_ueberschneidungen,
     ueberschneidung, wochenplan_soll, wochensoll,
 )
@@ -486,11 +487,44 @@ def test_benutzername_zaehlt_bei_dopplung_hoch():
     assert benutzername_vorschlag("Anna Meier", ["A.MEIER"]) == "a.meier2"
 
 
+
+def test_mariae_himmelfahrt_bayern_optional():
+    r_aus = Regeln(bundesland="BY", feiertage_beruecksichtigen=True, mariae_himmelfahrt_by=False)
+    r_an = Regeln(bundesland="BY", feiertage_beruecksichtigen=True, mariae_himmelfahrt_by=True)
+    assert not ist_feiertag(date(2026, 8, 15), r_aus)
+    assert ist_feiertag(date(2026, 8, 15), r_an)
+
+
+def test_urlaub_eintritt_spaet_im_jahr_teilurlaub():
+    # Eintritt 15.09.: volle Monate Okt–Dez = 3; 30 * 3/12 = 7,5 -> 8.
+    assert urlaubsanspruch_eintritt(30, 2026, date(2026, 9, 15)) == 8
+
+
+def test_urlaub_eintritt_frueh_wartezeit_erfuellt():
+    # Eintritt 01.03.: sechs Monate werden im Kalenderjahr erfüllt -> voller Anspruch.
+    assert urlaubsanspruch_eintritt(30, 2026, date(2026, 3, 1)) == 30
+
+
+def test_urlaub_eintritt_folgejahr_voll():
+    assert urlaubsanspruch_eintritt(30, 2027, date(2026, 11, 15)) == 30
+
+
 # ---------------------------------------------------------------- Testlauf
+
+
+
+def test_individueller_wochenplan_montag_dienstag():
+    r = Regeln(bundesland="BY", feiertage_beruecksichtigen=False)
+    assert arbeitstage_nach_wochenplan(date(2026, 9, 7), date(2026, 9, 13), {0, 1}, r) == 2
+
+def test_individueller_wochenplan_wochenende():
+    r = Regeln(bundesland="BY", feiertage_beruecksichtigen=False)
+    assert arbeitstage_nach_wochenplan(date(2026, 9, 7), date(2026, 9, 13), {5, 6}, r) == 2
 
 def _alle_tests():
     return [(name, funktion) for name, funktion in sorted(globals().items())
             if name.startswith("test_") and callable(funktion)]
+
 
 
 if __name__ == "__main__":

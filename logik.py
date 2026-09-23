@@ -50,6 +50,7 @@ class Regeln:
     bundesland: str = "BY"
     feiertage_beruecksichtigen: bool = True
     urlaub_in_arbeitstagen: bool = True
+    mariae_himmelfahrt_by: bool = False
     nachtschicht_erlaubt: bool = True
     pause_schwelle_1: float = 6.0     # § 4 ArbZG: über 6 Std. -> 30 Min.
     pause_dauer_1: int = 30
@@ -147,7 +148,18 @@ def feiertage(jahr: int, bundesland: str = "BY") -> frozenset:
 
 
 def ist_feiertag(tag: date, regeln: Regeln = STANDARD_REGELN) -> bool:
-    return regeln.feiertage_beruecksichtigen and tag in feiertage(tag.year, regeln.bundesland)
+    if not regeln.feiertage_beruecksichtigen:
+        return False
+    if tag in feiertage(tag.year, regeln.bundesland):
+        return True
+    # Bayern-Sonderfall: Mariä Himmelfahrt gilt nur in den vom Bayerischen
+    # Landesamt für Statistik festgestellten Gemeinden. Die App bildet dies
+    # deshalb bewusst als Standort-Einstellung ab statt pauschal für ganz BY.
+    return bool(
+        regeln.bundesland == "BY"
+        and regeln.mariae_himmelfahrt_by
+        and tag.month == 8 and tag.day == 15
+    )
 
 
 def ist_arbeitstag(tag: date, regeln: Regeln = STANDARD_REGELN) -> bool:
@@ -393,6 +405,63 @@ def ruhezeit_verletzung(neu: Buchung, bestehende: list,
     return None
 
 
+def volle_monate_im_kalenderjahr(eintritt: date, jahr: int) -> int:
+    """Volle Beschäftigungsmonate im Kalenderjahr ab Eintritt bis 31.12."""
+    if not isinstance(eintritt, date) or eintritt.year > jahr:
+        return 0
+    if eintritt.year < jahr:
+        return 12
+    # Ein Monat zählt nur, wenn das Arbeitsverhältnis den vollen Monat bestand.
+    return max(0, 12 - eintritt.month + (1 if eintritt.day == 1 else 0))
+
+
+def urlaubsanspruch_eintritt(jahresurlaub: int, jahr: int, eintritt: date | None,
+                             austritt: date | None = None) -> int:
+    """Grundmodell nach §§ 4, 5 BUrlG für Eintritt im laufenden Jahr.
+
+    Nach sechsmonatigem Bestehen entsteht grundsätzlich der volle Jahresanspruch.
+    Kann die Wartezeit im Eintrittsjahr nicht erfüllt werden, entsteht 1/12 für
+    jeden vollen Beschäftigungsmonat. Bruchteile >= 0,5 werden aufgerundet.
+
+    Tarif-/Arbeitsverträge können für den übergesetzlichen Mehrurlaub abweichende
+    Regeln enthalten; diese Funktion bildet deshalb bewusst nur das Grundmodell ab.
+    """
+    anspruch = max(0, int(jahresurlaub or 0))
+    if anspruch == 0:
+        return 0
+    if not isinstance(eintritt, date) or eintritt.year < jahr:
+        return anspruch
+    if eintritt.year > jahr:
+        return 0
+
+    # Sechsmonatige Wartezeit: Eintritt + 6 Kalendermonate ohne externe Bibliothek.
+    monat = eintritt.month + 6
+    jahr6 = eintritt.year + (monat - 1) // 12
+    monat6 = (monat - 1) % 12 + 1
+    import calendar
+    tag6 = min(eintritt.day, calendar.monthrange(jahr6, monat6)[1])
+    wartezeit_ende = date(jahr6, monat6, tag6)
+
+    jahresende = date(jahr, 12, 31)
+    effektives_ende = min(austritt, jahresende) if isinstance(austritt, date) else jahresende
+
+    # Volle Wartezeit im Kalenderjahr erfüllt und Arbeitsverhältnis besteht dann noch:
+    if wartezeit_ende <= effektives_ende and wartezeit_ende.year == jahr:
+        return anspruch
+
+    monate = volle_monate_im_kalenderjahr(eintritt, jahr)
+    if isinstance(austritt, date) and austritt.year == jahr:
+        # Nur vollständig bestehende Monate bis Austritt berücksichtigen.
+        end_monat = austritt.month - (1 if austritt.day < __import__("calendar").monthrange(jahr, austritt.month)[1] else 0)
+        start_monat = eintritt.month + (0 if eintritt.day == 1 else 1)
+        monate = max(0, end_monat - start_monat + 1)
+
+    roh = anspruch * monate / 12.0
+    ganz = int(roh)
+    rest = roh - ganz
+    return ganz + (1 if rest >= 0.5 else 0)
+
+
 # ============================================================
 # 4. ABWESENHEITEN UND SALDO
 # ============================================================
@@ -564,3 +633,16 @@ def benutzername_vorschlag(name: str, vergeben=()) -> str:
         zaehler += 1
         kandidat = f"{basis}{zaehler}"
     return kandidat
+
+
+def arbeitstage_nach_wochenplan(von: date, bis: date, arbeitstage: set[int] | frozenset[int],
+                                regeln: Regeln = STANDARD_REGELN) -> int:
+    """Zählt individuelle regelmäßige Arbeitstage (0=Mo ... 6=So) ohne Feiertage."""
+    if von is None or bis is None or bis < von:
+        return 0
+    tage = {int(t) for t in (arbeitstage or set()) if 0 <= int(t) <= 6}
+    return sum(
+        1 for i in range((bis - von).days + 1)
+        if (tag := von + timedelta(days=i)).weekday() in tage
+        and not ist_feiertag(tag, regeln)
+    )

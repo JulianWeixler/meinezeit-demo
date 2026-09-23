@@ -234,42 +234,63 @@ DEMO_MITARBEITER = {
         {"name": "Julia Hoffmann", "wochenstunden": 40.0, "urlaub": 30, "rest": 2, "projekt": "Projekt Alpha"},
         {"name": "Tobias Wagner", "wochenstunden": 40.0, "urlaub": 30, "rest": 0, "projekt": "Kunde Beispiel AG"},
         {"name": "Nina Krause", "wochenstunden": 32.0, "urlaub": 30, "rest": 3, "projekt": "Interne Prozesse"},
+            {"name": "Felix Brandt", "wochenstunden": 40.0, "urlaub": 30, "rest": 1, "projekt": "ERP Einführung"},
+        {"name": "Miriam Scholz", "wochenstunden": 30.0, "urlaub": 30, "rest": 4, "projekt": "Verwaltung"},
+        {"name": "David Keller", "wochenstunden": 38.0, "urlaub": 30, "rest": 0, "projekt": "Projekt Beta"},
     ],
     "Handwerk / Bau": [
         {"name": "Michael Bauer", "wochenstunden": 40.0, "urlaub": 28, "rest": 2, "projekt": "Neubau Musterstraße 12"},
         {"name": "Kevin Fischer", "wochenstunden": 40.0, "urlaub": 28, "rest": 0, "projekt": "Sanierung Rathausplatz"},
         {"name": "Sabine Roth", "wochenstunden": 35.0, "urlaub": 30, "rest": 4, "projekt": "Bürogebäude Nord"},
+            {"name": "Thomas Gruber", "wochenstunden": 40.0, "urlaub": 28, "rest": 1, "projekt": "Dachsanierung Isarweg"},
+        {"name": "Emre Yilmaz", "wochenstunden": 40.0, "urlaub": 28, "rest": 0, "projekt": "Umbau Ladenfläche"},
+        {"name": "Lisa Hartmann", "wochenstunden": 32.0, "urlaub": 30, "rest": 3, "projekt": "Wohnanlage Süd"},
     ],
     "Dienstleistung / Beratung": [
         {"name": "Laura Becker", "wochenstunden": 40.0, "urlaub": 30, "rest": 2, "projekt": "Digitalisierung Muster GmbH"},
         {"name": "Max König", "wochenstunden": 40.0, "urlaub": 30, "rest": 0, "projekt": "Prozessberatung Beispiel AG"},
         {"name": "Sophie Wagner", "wochenstunden": 32.0, "urlaub": 30, "rest": 3, "projekt": "Automatisierung Kundenservice"},
+            {"name": "Jonas Wolf", "wochenstunden": 40.0, "urlaub": 30, "rest": 1, "projekt": "ERP Rollout Süd"},
+        {"name": "Leonie Frank", "wochenstunden": 35.0, "urlaub": 30, "rest": 2, "projekt": "Reporting & BI"},
+        {"name": "Daniel Krüger", "wochenstunden": 40.0, "urlaub": 30, "rest": 0, "projekt": "Prozessaufnahme Einkauf"},
     ],
     "Kita / Soziales": [
         {"name": "Anna Müller", "wochenstunden": 39.0, "urlaub": 30, "rest": 2, "projekt": "Bärengruppe"},
         {"name": "Daniela Freitag", "wochenstunden": 30.0, "urlaub": 30, "rest": 1, "projekt": "Igelgruppe"},
         {"name": "Julian Weixler", "wochenstunden": 39.0, "urlaub": 30, "rest": 0, "projekt": "Leitung / Springer"},
+            {"name": "Sarah Neumann", "wochenstunden": 32.0, "urlaub": 30, "rest": 3, "projekt": "Fuchsgruppe"},
+        {"name": "Maria Schneider", "wochenstunden": 25.0, "urlaub": 30, "rest": 2, "projekt": "Krippengruppe"},
+        {"name": "Lukas Berger", "wochenstunden": 35.0, "urlaub": 30, "rest": 1, "projekt": "Springer"},
     ],
     "Pflege / Gesundheit": [
         {"name": "Petra Schulz", "wochenstunden": 38.5, "urlaub": 30, "rest": 3, "projekt": "Station 2"},
         {"name": "Markus Lang", "wochenstunden": 38.5, "urlaub": 30, "rest": 0, "projekt": "Ambulanter Dienst"},
         {"name": "Christine Böhm", "wochenstunden": 30.0, "urlaub": 30, "rest": 2, "projekt": "Nachtwache"},
+            {"name": "Nadine Peters", "wochenstunden": 35.0, "urlaub": 30, "rest": 1, "projekt": "Station 1"},
+        {"name": "Mehmet Aydin", "wochenstunden": 38.5, "urlaub": 30, "rest": 0, "projekt": "Tour Nord"},
+        {"name": "Eva Richter", "wochenstunden": 28.0, "urlaub": 30, "rest": 4, "projekt": "Tagespflege"},
     ],
     "Gastronomie / Hotel": [
         {"name": "Lukas Peters", "wochenstunden": 40.0, "urlaub": 24, "rest": 1, "projekt": "Restaurant"},
         {"name": "Melanie Voss", "wochenstunden": 30.0, "urlaub": 24, "rest": 0, "projekt": "Bankett & Events"},
         {"name": "David Kaya", "wochenstunden": 40.0, "urlaub": 24, "rest": 2, "projekt": "Küche"},
+            {"name": "Sofia Romano", "wochenstunden": 35.0, "urlaub": 26, "rest": 1, "projekt": "Frühstück"},
+        {"name": "Jan Hoffmann", "wochenstunden": 40.0, "urlaub": 24, "rest": 0, "projekt": "Rezeption"},
+        {"name": "Amira Hassan", "wochenstunden": 30.0, "urlaub": 26, "rest": 3, "projekt": "Housekeeping"},
     ],
     "Einzelhandel": [
         {"name": "Sandra Klein", "wochenstunden": 35.0, "urlaub": 28, "rest": 1, "projekt": "Filiale Innenstadt"},
         {"name": "Jonas Richter", "wochenstunden": 20.0, "urlaub": 28, "rest": 0, "projekt": "Filiale Innenstadt"},
         {"name": "Yvonne Neumann", "wochenstunden": 40.0, "urlaub": 28, "rest": 3, "projekt": "Lager & Logistik"},
+            {"name": "Mara König", "wochenstunden": 30.0, "urlaub": 28, "rest": 2, "projekt": "Damenmode"},
+        {"name": "Tim Berger", "wochenstunden": 38.0, "urlaub": 28, "rest": 0, "projekt": "Herrenmode"},
+        {"name": "Aylin Demir", "wochenstunden": 25.0, "urlaub": 28, "rest": 1, "projekt": "Kasse / Service"},
     ],
 }
 DEMO_FIRMENNAMEN = {
     "Allgemein / Büro": "Beispiel Consulting GmbH",
     "Handwerk / Bau": "Mustermann Bau GmbH",
-    "Kita / Soziales": "Kita Sonnenschein e.V.",
+    "Kita / Soziales": "Kindergarten",
     "Dienstleistung / Beratung": "Beispiel Beratung GmbH",
     "Pflege / Gesundheit": "Pflegedienst Lebensfreude GmbH",
     "Gastronomie / Hotel": "Hotel & Restaurant Musterhof",
@@ -303,8 +324,8 @@ SPALTEN_URLAUB = [
     "Art", "Kommentar", "Status", "Eingereicht am", "Entscheidungsgrund", "Erfasst von",
 ]
 SPALTEN_STAMM = [
-    "MA-ID", "Mitarbeiter", "Personalnummer", "Wochenstunden",
-    "Urlaub_Pro_Jahr", "Resturlaub_Vorjahr", "Nachtrag_Std_Limit", "Aktiv",
+    "MA-ID", "Mitarbeiter", "Personalnummer", "Eintrittsdatum", "Austrittsdatum",
+    "Wochenstunden", "Urlaub_Pro_Jahr", "Resturlaub_Vorjahr", "Nachtrag_Std_Limit", "Aktiv",
 ]
 SPALTEN_ARBEITSZEITKALENDER = [
     # KAL-ID ist zwingend: der inkrementelle Speicher-Abgleich braucht je Zeile einen
@@ -714,6 +735,19 @@ def diagnosebericht() -> str:
     zeilen.append("=" * 60)
     zeilen.append(f"Support: {SUPPORT_KONTAKT} · {SUPPORT_ZEITEN}")
     return "\n".join(zeilen)
+
+
+def backup_integritaet_pruefen(pfad: Path) -> tuple[bool, str]:
+    """Prüft ein SQLite-Backup lesend mit PRAGMA integrity_check."""
+    try:
+        if not pfad or not Path(pfad).exists():
+            return False, "Backup-Datei nicht gefunden."
+        with sqlite3.connect(str(pfad)) as conn:
+            ergebnis = conn.execute("PRAGMA integrity_check").fetchone()
+        ok = bool(ergebnis and str(ergebnis[0]).lower() == "ok")
+        return ok, "OK" if ok else f"Integritätsprüfung: {ergebnis[0] if ergebnis else 'kein Ergebnis'}"
+    except Exception as exc:
+        return False, str(exc)
 
 
 def alte_backups_loeschen(tage: int = 90) -> None:
@@ -1644,6 +1678,8 @@ STANDARD_CONFIG = {
     "urlaub_in_arbeitstagen": True,
     "feiertage_beruecksichtigen": True,
     "bundesland": "BY",
+    "mariae_himmelfahrt_by": False,
+    "urlaub_eintritt_burlg": True,
     "nachtschicht_erlaubt": True,
     "live_stempeln_aktiv": True,
     # Arbeitsschutz: Grenzwerte nach ArbZG, einstellbar wegen abweichender Tarifregeln
@@ -1653,7 +1689,7 @@ STANDARD_CONFIG = {
     "ruhezeit_pruefen": True,
     # Aufbewahrung: mindestens zwei Jahre (§ 16 ArbZG), danach loeschbar (DSGVO)
     "aufbewahrung_jahre": 3,
-    "passwort_mindestlaenge": 10,
+    "passwort_mindestlaenge": 12,
     "max_login_versuche": 5,
     "sperrdauer_minuten": 5,
     "logo_base64": "",
@@ -2150,8 +2186,13 @@ FEIERTAGSNAMEN = {
 
 
 def feiertage_benannt(jahr: int, bundesland: str) -> list:
-    """Liste (Datum, Name) der Feiertage – für die Vorschau in den Einstellungen."""
-    return list(logik.feiertage_benannt(jahr, bundesland))
+    """Liste (Datum, Name) der Feiertage – inkl. konfiguriertem Bayern-Sonderfall."""
+    liste = list(logik.feiertage_benannt(jahr, bundesland))
+    if (bundesland == "BY" and bool(cfg("mariae_himmelfahrt_by"))
+            and (date(jahr, 8, 15), "Mariä Himmelfahrt") not in liste):
+        liste.append((date(jahr, 8, 15), "Mariä Himmelfahrt"))
+        liste.sort(key=lambda x: x[0])
+    return liste
 
 
 def ist_arbeitstag(tag: date) -> bool:
@@ -2159,7 +2200,32 @@ def ist_arbeitstag(tag: date) -> bool:
 
 
 def arbeitstage_zwischen(von: date, bis: date) -> int:
+    """Fallback ohne Mitarbeiterbezug: Montag–Freitag gemäß Regelwerk."""
     return logik.arbeitstage_zwischen(von, bis, regeln())
+
+
+def arbeitstage_fuer_mitarbeiter(name: str, von: date, bis: date) -> int:
+    """Urlaubs-/Abwesenheitstage nach dem individuellen Wochenarbeitszeitkalender.
+
+    Existiert kein Wochenplan, wird aus Kompatibilitätsgründen auf die bisherige
+    Montag-bis-Freitag-Logik zurückgefallen. Gesetzliche Feiertage zählen nicht.
+    """
+    if not name or von is None or bis is None or bis < von:
+        return 0
+    kalender = arbeitszeitkalender_von(name)
+    if kalender.empty:
+        return arbeitstage_zwischen(von, bis)
+    arbeitstage = set(
+        pd.to_numeric(
+            kalender[kalender["Arbeitstag"].fillna(False).astype(bool)]["Wochentag"],
+            errors="coerce"
+        ).dropna().astype(int).tolist()
+    )
+    return sum(
+        1 for i in range((bis - von).days + 1)
+        if (tag := von + timedelta(days=i)).weekday() in arbeitstage
+        and not logik.ist_feiertag(tag, regeln())
+    )
 
 
 def pause_gesetzlich(brutto_stunden: float) -> int:
@@ -2245,7 +2311,9 @@ def demo_zuruecksetzen(branche_key: str, firmenname: str) -> None:
     st.session_state.arbeitszeitkalender = pd.DataFrame(columns=SPALTEN_ARBEITSZEITKALENDER)
 
     # 2) Benutzerkonten: eigene Admin-Konten bleiben, Mitarbeiterkonten werden ersetzt
-    admins = st.session_state.benutzer[st.session_state.benutzer["Rolle"] == "Leitung / Admin"]
+    admins = st.session_state.benutzer[
+        st.session_state.benutzer["Rolle"].astype(str) != "Mitarbeiter"
+    ].copy()
     vergeben = set(admins["Benutzername"].astype(str))
     neue_konten = [admins]
     for stamm, demo in zip(neue_stamm, DEMO_MITARBEITER[branche_key]):
@@ -2260,61 +2328,115 @@ def demo_zuruecksetzen(branche_key: str, firmenname: str) -> None:
 
     # 3) Kunden und Projekte für auftragsbezogene Branchen
     if branche_key in {"Handwerk / Bau", "Dienstleistung / Beratung"}:
-        kunden_demo = [
-            {"Kunden-ID": "kd-demo-01", "Kundennummer": "K-1001", "Kunde": "Musterkunde GmbH", "Ansprechpartner": "Thomas Muster", "Telefon": "089 123456", "E-Mail": "kontakt@musterkunde.de", "Straße": "Musterstraße 12", "PLZ": "80331", "Ort": "München", "Aktiv": True, "Notiz": "Demo-Kunde"},
-            {"Kunden-ID": "kd-demo-02", "Kundennummer": "K-1002", "Kunde": "Beispiel Immobilien GmbH", "Ansprechpartner": "Anna Beispiel", "Telefon": "089 654321", "E-Mail": "info@beispiel-immobilien.de", "Straße": "Hauptstraße 8", "PLZ": "80802", "Ort": "München", "Aktiv": True, "Notiz": "Demo-Kunde"},
-            {"Kunden-ID": "kd-demo-03", "Kundennummer": "K-1003", "Kunde": "Stadt & Partner", "Ansprechpartner": "Max Stadt", "Telefon": "089 987654", "E-Mail": "office@stadt-partner.de", "Straße": "Rathausplatz 1", "PLZ": "80333", "Ort": "München", "Aktiv": True, "Notiz": "Demo-Kunde"},
+        kunden_demo = []
+        kunden_namen = [
+            ("Müller Immobilien GmbH", "Thomas Müller"), ("Isar Hausverwaltung GmbH", "Anna Weber"),
+            ("Stadtbau Süd GmbH", "Martin König"), ("Bergmann Gewerbebau KG", "Julia Bergmann"),
+            ("Wohnwert München GmbH", "Stefan Huber"), ("Alpenblick Projektbau GmbH", "Lisa Maier"),
+        ] if branche_key == "Handwerk / Bau" else [
+            ("Muster Digital GmbH", "Thomas Muster"), ("Beispiel AG", "Anna Beispiel"),
+            ("Südwerk GmbH", "Max Berger"), ("Alpen Services GmbH", "Laura Huber"),
+            ("Nova Handel GmbH", "Daniel Frank"), ("Isar Solutions AG", "Sophie König"),
         ]
-        projekte_demo = [
-            {"Projekt-ID": "pr-demo-01", "Projektnummer": "P-2001", "Projekt": "Neubau Musterstraße 12", "Kunden-ID": "kd-demo-01", "Status": "Laufend", "Startdatum": heute - timedelta(days=30), "Enddatum": heute + timedelta(days=120), "Stundensatz": 75.0, "Aktiv": True, "Notiz": "Demo-Projekt"},
-            {"Projekt-ID": "pr-demo-02", "Projektnummer": "P-2002", "Projekt": "Sanierung Rathausplatz", "Kunden-ID": "kd-demo-03", "Status": "Laufend", "Startdatum": heute - timedelta(days=14), "Enddatum": heute + timedelta(days=90), "Stundensatz": 82.5, "Aktiv": True, "Notiz": "Demo-Projekt"},
-            {"Projekt-ID": "pr-demo-03", "Projektnummer": "P-2003", "Projekt": "Bürogebäude Nord", "Kunden-ID": "kd-demo-02", "Status": "Offen", "Startdatum": heute, "Enddatum": None, "Stundensatz": 75.0, "Aktiv": True, "Notiz": "Demo-Projekt"},
-        ]
+        for idx, (name, ap) in enumerate(kunden_namen, start=1):
+            kunden_demo.append({
+                "Kunden-ID": f"kd-demo-{idx:02d}", "Kundennummer": f"K-{1000+idx}", "Kunde": name,
+                "Ansprechpartner": ap, "Telefon": f"089 555{idx:04d}", "E-Mail": f"kontakt{idx}@demo-beispiel.de",
+                "Straße": f"Beispielweg {idx*3}", "PLZ": "80331", "Ort": "München",
+                "Aktiv": idx != 6, "Notiz": "Fiktiver Demo-Kunde",
+            })
+        projekt_namen = (
+            ["Neubau Musterstraße 12", "Sanierung Rathausplatz", "Bürogebäude Nord", "Dachsanierung Isarweg",
+             "Umbau Ladenfläche", "Wohnanlage Süd", "Tiefgarage West", "Fassadensanierung Zentrum"]
+            if branche_key == "Handwerk / Bau" else
+            ["Digitalisierung Muster GmbH", "Prozessberatung Beispiel AG", "Automatisierung Kundenservice",
+             "ERP Rollout Süd", "Reporting & BI", "Prozessaufnahme Einkauf", "Workshop Finance", "Schnittstellenkonzept"]
+        )
+        projekte_demo = []
+        for idx, pname in enumerate(projekt_namen, start=1):
+            projekte_demo.append({
+                "Projekt-ID": f"pr-demo-{idx:02d}", "Projektnummer": f"P-{2000+idx}", "Projekt": pname,
+                "Kunden-ID": f"kd-demo-{((idx-1)%6)+1:02d}",
+                "Status": "Laufend" if idx <= 6 else ("Offen" if idx == 7 else "Abgeschlossen"),
+                "Startdatum": heute - timedelta(days=90-idx*5),
+                "Enddatum": heute + timedelta(days=60+idx*10) if idx <= 7 else heute-timedelta(days=10),
+                "Stundensatz": (75.0 + idx*1.5) if branche_key == "Handwerk / Bau" else (92.0 + idx*3),
+                "Aktiv": idx != 8, "Notiz": "Fiktives Demo-Projekt",
+            })
         st.session_state.kunden = pd.DataFrame(kunden_demo, columns=SPALTEN_KUNDEN)
         st.session_state.projekte = pd.DataFrame(projekte_demo, columns=SPALTEN_PROJEKTE)
     else:
         st.session_state.kunden = pd.DataFrame(columns=SPALTEN_KUNDEN)
         st.session_state.projekte = pd.DataFrame(columns=SPALTEN_PROJEKTE)
 
-    # 4) Beispiel-Zeiten der letzten Tage
+    # 4) Umfangreiche Beispiel-Zeiten: ca. sechs Arbeitswochen pro Person
     zeilen = []
+    arbeitstage = []
+    tag = heute - timedelta(days=1)
+    while len(arbeitstage) < 30:
+        if tag.weekday() < 5:
+            arbeitstage.append(tag)
+        tag -= timedelta(days=1)
+    zeitvarianten = [
+        (time(8, 0), time(16, 30)), (time(7, 45), time(16, 15)),
+        (time(8, 15), time(17, 0)), (time(8, 30), time(16, 45)),
+        (time(7, 30), time(15, 45)),
+    ]
     for i, (stamm, demo) in enumerate(zip(neue_stamm, DEMO_MITARBEITER[branche_key])):
-        for tag_offset, (kommen, gehen, kategorie, status) in enumerate([
-            (time(8, 0), time(16, 30), kategorie_haupt, "Freigegeben"),
-            (time(7, 45), time(16, 15), kategorie_haupt, "Erfasst"),
-            (time(8, 15), time(12, 0), kategorie_zweit, "Erfasst"),
-        ]):
-            tag = heute - timedelta(days=1 + i + tag_offset * 2)
-            if tag.weekday() >= 5:
+        max_tage = 30 if float(stamm["Wochenstunden"]) >= 35 else 22
+        for j, datum in enumerate(arbeitstage[:max_tage]):
+            if (j + i) % 13 == 0:
                 continue
+            kommen, gehen = zeitvarianten[(j + i) % len(zeitvarianten)]
             brutto, pause, netto = berechne_arbeitszeit(kommen, gehen)
+            kategorie = branchendaten["kategorien"][(j+i) % min(len(branchendaten["kategorien"]), 3)][0]
+            kunde_id = projekt_id = ""
+            projekt_text = demo["projekt"]
+            if branche_key in {"Handwerk / Bau", "Dienstleistung / Beratung"}:
+                nr = ((i + j // 8) % 6) + 1
+                kunde_id = f"kd-demo-{nr:02d}"
+                projekt_id = f"pr-demo-{nr:02d}"
+                treffer = st.session_state.projekte[st.session_state.projekte["Projekt-ID"] == projekt_id]
+                if not treffer.empty:
+                    projekt_text = str(treffer.iloc[0]["Projekt"])
             zeilen.append({
-                "ID": neue_id(), "Mitarbeiter": stamm["Mitarbeiter"], "Datum": tag,
+                "ID": neue_id(), "Mitarbeiter": stamm["Mitarbeiter"], "Datum": datum,
                 "Kommen": kommen.strftime(ZEITFORMAT), "Gehen": gehen.strftime(ZEITFORMAT),
                 "Brutto (Std)": brutto, "Pause (Min)": pause, "Netto (Std)": netto,
-                "Kategorie": kategorie,
-                "Kunde-ID": ("kd-demo-01" if i == 0 else "kd-demo-03" if i == 1 else "kd-demo-02") if branche_key in {"Handwerk / Bau", "Dienstleistung / Beratung"} else "",
-                "Projekt-ID": ("pr-demo-01" if i == 0 else "pr-demo-02" if i == 1 else "pr-demo-03") if branche_key in {"Handwerk / Bau", "Dienstleistung / Beratung"} else "",
-                "Projekt": demo["projekt"], "Notiz": "",
-                "Typ": "Manuell", "Status": status,
+                "Kategorie": kategorie, "Kunde-ID": kunde_id, "Projekt-ID": projekt_id,
+                "Projekt": projekt_text, "Notiz": "" if j % 7 else "Demo-Eintrag",
+                "Typ": "Manuell", "Status": "Freigegeben" if j > 2 else "Erfasst",
             })
     st.session_state.time_logs = pd.DataFrame(zeilen, columns=SPALTEN_ZEITEN)
 
-    # 5) Ein Beispiel-Urlaubsantrag zur Veranschaulichung
-    erste = neue_stamm[0]
-    st.session_state.vacation_requests = pd.DataFrame([{
-        "ID": neue_id(), "Mitarbeiter": erste["Mitarbeiter"],
-        "Startdatum": heute + timedelta(days=10), "Enddatum": heute + timedelta(days=14),
-        "Einheit": "Tage", "Tage": arbeitstage_zwischen(heute + timedelta(days=10), heute + timedelta(days=14)),
-        "Stunden": 0.0, "Art": "Urlaub", "Kommentar": "", "Status": "Ausstehend",
-        "Entscheidungsgrund": "", "Erfasst von": "",
-        "Eingereicht am": heute,
-    }], columns=SPALTEN_URLAUB)
+    # 5) Mehrere Urlaubs-/Abwesenheitsanträge mit verschiedenen Status
+    abwesenheiten = []
+    muster = [
+        (0, 12, 16, "Urlaub", "Ausstehend", ""),
+        (1, -25, -21, "Urlaub", "Genehmigt", ""),
+        (2, 25, 27, "Urlaub", "Genehmigt", ""),
+        (3, 6, 6, "Freizeitausgleich", "Ausstehend", ""),
+        (4, -12, -12, "Überstundenabbau", "Genehmigt", ""),
+        (5, 35, 39, "Urlaub", "Abgelehnt", "Betriebliche Überschneidung"),
+    ]
+    for person_idx, von_off, bis_off, art, status, grund in muster:
+        person = neue_stamm[person_idx]
+        start_d, ende_d = heute + timedelta(days=von_off), heute + timedelta(days=bis_off)
+        tage = max(1, arbeitstage_zwischen(start_d, ende_d))
+        abwesenheiten.append({
+            "ID": neue_id(), "Mitarbeiter": person["Mitarbeiter"], "Startdatum": start_d,
+            "Enddatum": ende_d, "Einheit": "Tage", "Tage": tage, "Stunden": 0.0, "Art": art,
+            "Kommentar": "Fiktiver Demo-Antrag", "Status": status,
+            "Eingereicht am": heute - timedelta(days=7+person_idx),
+            "Entscheidungsgrund": grund,
+            "Erfasst von": "Demo-Leitung" if status in {"Genehmigt", "Abgelehnt"} else "",
+        })
+    st.session_state.vacation_requests = pd.DataFrame(abwesenheiten, columns=SPALTEN_URLAUB)
 
     # 6) Branche und Firmenname übernehmen
     st.session_state.config.update({"branche": branche_key, "firmenname": firmenname.strip() or firmenname})
 
-    for schluessel in ("mitarbeiter_stammdaten", "benutzer", "kunden", "projekte", "time_logs", "vacation_requests"):
+    for schluessel in ("mitarbeiter_stammdaten", "benutzer", "kunden", "projekte", "time_logs", "vacation_requests", "arbeitszeitkalender"):
         speichern(schluessel)
     einstellungen_speichern(st.session_state.config)
 
@@ -2569,17 +2691,53 @@ def _abwesenheiten_alt(name: str) -> list:
     return liste
 
 
-def get_urlaubs_konto(name: str):
-    """(Anspruch, genehmigt, ausstehend, verfügbar) – nur tageweiser Urlaub."""
+def get_urlaubs_konto(name: str, jahr: int | None = None):
+    """Urlaubskonto für ein Kalenderjahr.
+
+    Eintritt im laufenden Jahr wird optional nach dem BUrlG-Grundmodell behandelt.
+    Jahresübergreifende Anträge werden nur mit den Arbeitstagen des gewählten
+    Kalenderjahres belastet. Dadurch zählen Vorjahres-/Folgejahresurlaube nicht
+    versehentlich in das aktuelle Urlaubskonto.
+    """
     zeile = stammdaten_zeile(name)
     if zeile is None:
         return 0, 0, 0, 0
-    konto = logik.urlaubskonto(
-        int(zeile["Urlaub_Pro_Jahr"] or 0),
-        int(zeile["Resturlaub_Vorjahr"] or 0),
-        abwesenheiten_von(name),
-    )
-    return konto.als_tupel()
+    jahr = int(jahr or date.today().year)
+    basis = int(pd.to_numeric(zeile.get("Urlaub_Pro_Jahr"), errors="coerce") or 0)
+    rest = int(pd.to_numeric(zeile.get("Resturlaub_Vorjahr"), errors="coerce") or 0) if jahr == date.today().year else 0
+
+    def _datum(wert):
+        if isinstance(wert, datetime):
+            return wert.date()
+        if isinstance(wert, date):
+            return wert
+        try:
+            x = pd.to_datetime(wert, errors="coerce")
+            return None if pd.isna(x) else x.date()
+        except Exception:
+            return None
+
+    eintritt = _datum(zeile.get("Eintrittsdatum"))
+    austritt = _datum(zeile.get("Austrittsdatum"))
+    anspruch = (logik.urlaubsanspruch_eintritt(basis, jahr, eintritt, austritt)
+                if bool(cfg("urlaub_eintritt_burlg")) else basis)
+
+    genehmigt = 0
+    ausstehend = 0
+    for a in abwesenheiten_von(name):
+        if a.art != "Urlaub" or a.einheit != "Tage" or a.status not in ("Genehmigt", "Ausstehend"):
+            continue
+        von = max(a.start, date(jahr, 1, 1))
+        bis = min(a.ende, date(jahr, 12, 31))
+        if von > bis:
+            continue
+        tage = arbeitstage_fuer_mitarbeiter(name, von, bis)
+        if a.status == "Genehmigt":
+            genehmigt += tage
+        else:
+            ausstehend += tage
+    gesamt = anspruch + rest
+    return gesamt, genehmigt, ausstehend, gesamt - genehmigt - ausstehend
 
 
 def stundenabwesenheiten(name: str, von: date = None, bis: date = None,
@@ -2608,13 +2766,44 @@ def zeiten_von(name=None, von: date = None, bis: date = None) -> pd.DataFrame:
 
 
 def berechne_saldo(name: str, von: date, bis: date):
-    """Ist-Stunden, Soll-Stunden und Saldo. Abwesenheiten senken das Soll."""
+    """Ist/Soll/Saldo unter Beachtung des individuellen Wochenplans.
+
+    Ganze genehmigte Abwesenheiten reduzieren exakt das Soll des betroffenen
+    Arbeitstags; stundenweise genehmigte Abwesenheiten reduzieren das Soll um
+    die genehmigten Stunden. Ohne Wochenplan bleibt die bisherige Fachlogik aktiv.
+    """
     df = zeiten_von(name, von, bis)
     ist = float(pd.to_numeric(df["Netto (Std)"], errors="coerce").sum()) if not df.empty else 0.0
-    zeile = stammdaten_zeile(name)
-    wochenstunden = float(zeile["Wochenstunden"]) if zeile is not None else branche()["wochenstunden"]
-    saldo = logik.berechne_saldo(ist, von, bis, wochenstunden, abwesenheiten_von(name), regeln())
-    return saldo.als_tupel()
+    kalender = arbeitszeitkalender_von(name)
+    if kalender.empty:
+        zeile = stammdaten_zeile(name)
+        wochenstunden = float(zeile["Wochenstunden"]) if zeile is not None else branche()["wochenstunden"]
+        saldo = logik.berechne_saldo(ist, von, bis, wochenstunden, abwesenheiten_von(name), regeln())
+        return saldo.als_tupel()
+
+    abwesenheiten = abwesenheiten_von(name)
+    soll = 0.0
+    tag = von
+    while tag <= bis:
+        tages_soll = 0.0 if logik.ist_feiertag(tag, regeln()) else tagessoll(name, tag.weekday())
+        if tages_soll > 0:
+            ganze = any(
+                a.status == "Genehmigt" and a.einheit == "Tage"
+                and isinstance(a.start, date) and isinstance(a.ende, date)
+                and a.start <= tag <= a.ende
+                for a in abwesenheiten
+            )
+            if not ganze:
+                stunden = sum(
+                    float(a.stunden or 0.0) for a in abwesenheiten
+                    if a.status == "Genehmigt" and a.einheit == "Stunden"
+                    and isinstance(a.start, date) and a.start == tag
+                )
+                soll += max(0.0, tages_soll - stunden)
+        tag += timedelta(days=1)
+    soll = round(soll, 2)
+    ist = round(ist, 2)
+    return ist, soll, round(ist - soll, 2)
 
 
 # ============================================================
@@ -4088,7 +4277,7 @@ if st.session_state.role == "Mitarbeiter":
                                        min_value=abw_von_aktuell,
                                        format=DATUMSFORMAT_UI, key="abw_ende")
                 u_stunden = 0.0
-                tage_vorschau = arbeitstage_zwischen(u_start, u_ende)
+                tage_vorschau = arbeitstage_fuer_mitarbeiter(benutzer, u_start, u_ende)
                 st.caption(t(f"= {tage_vorschau} Arbeitstage", f"= {tage_vorschau} working days"))
             else:
                 d1, d2 = st.columns(2)
@@ -4098,6 +4287,9 @@ if st.session_state.role == "Mitarbeiter":
                 u_stunden = d2.number_input(t("Stunden", "Hours"), 0.5, 12.0, float(standard), 0.5,
                                             key="abw_stunden")
             u_kommentar = st.text_input(t("Kommentar", "Comment"), key="abw_kommentar")
+            if str(art).casefold() in {"krankheit", "arbeitsunfähig", "arbeitsunfaehig"}:
+                st.caption(t("Bitte keine Diagnose oder medizinischen Details eintragen.",
+                             "Please do not enter diagnoses or medical details."))
 
             if st.button(t("🌴 Antrag senden", "🌴 Submit request"),
                          use_container_width=True, type="primary", key="abw_senden"):
@@ -4105,7 +4297,7 @@ if st.session_state.role == "Mitarbeiter":
                     st.error(t("Das Startdatum darf nicht nach dem Enddatum liegen.",
                                "The start date must not be after the end date."))
                 else:
-                    tage = arbeitstage_zwischen(u_start, u_ende) if modus == "Tage" else 0
+                    tage = arbeitstage_fuer_mitarbeiter(benutzer, u_start, u_ende) if modus == "Tage" else 0
                     if modus == "Tage" and tage == 0:
                         st.error(t("Der Zeitraum enthält keine Arbeitstage.",
                                    "The period contains no working days."))
@@ -4256,6 +4448,7 @@ elif st.session_state.role == "Systemadministrator" and not st.session_state.get
     k3.metric("Datenbank", "OK" if DB_DATEI.exists() and sqlite_integritaet_pruefen() else "Prüfen")
     k4.metric("Backups", len(list(BACKUP_DIR.glob("zeiterfassung_*.db"))) if BACKUP_DIR.exists() else 0)
 
+    st.caption("Als Systemadministrator können Sie die Leitungs-/Admin-Ansicht für Support und Administration jederzeit öffnen.")
     if st.button("👥 Leitungs-/Admin-Ansicht öffnen", type="primary", use_container_width=True):
         st.session_state.systemadmin_adminmodus = True
         st.rerun()
@@ -4316,6 +4509,12 @@ elif st.session_state.role == "Systemadministrator" and not st.session_state.get
             except Exception as exc:
                 st.error(f"Backup fehlgeschlagen: {exc}")
         if backups:
+            if st.button("🧪 Neuestes SQLite-Backup prüfen", use_container_width=True):
+                ok, meldung = backup_integritaet_pruefen(backups[0])
+                if ok:
+                    st.success(f"Backup {backups[0].name}: Integritätsprüfung erfolgreich.")
+                else:
+                    st.error(f"Backup {backups[0].name}: {meldung}")
             st.dataframe(pd.DataFrame([
                 {"Datei": b.name, "Größe (KB)": round(b.stat().st_size / 1024, 1),
                  "Erstellt": datetime.fromtimestamp(b.stat().st_mtime).strftime("%d.%m.%Y %H:%M")}
@@ -4605,12 +4804,15 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                     u_stunden = d2.number_input(t("Stunden", "Hours"), 0.5, 12.0,
                                                 value=round(tagessoll(benutzer) / 2, 1), step=0.5, key="admin_abw_stunden")
                 u_kommentar = st.text_input(t("Kommentar (optional)", "Comment (optional)"), key="admin_abw_kommentar")
+                if str(art).casefold() in {"krankheit", "arbeitsunfähig", "arbeitsunfaehig"}:
+                    st.caption(t("Bitte keine Diagnose oder medizinischen Details eintragen.",
+                                 "Please do not enter diagnoses or medical details."))
                 if st.button(t("🌴 Antrag absenden", "🌴 Submit request"), key="admin_abw_absenden",
                              use_container_width=True, type="primary"):
                     if modus == "Tage" and u_start > u_ende:
                         st.error(t("Das Startdatum darf nicht nach dem Enddatum liegen.", "The start date must not be after the end date."))
                     else:
-                        tage = arbeitstage_zwischen(u_start, u_ende) if modus == "Tage" else 0
+                        tage = arbeitstage_fuer_mitarbeiter(benutzer, u_start, u_ende) if modus == "Tage" else 0
                         if modus == "Tage" and tage == 0:
                             st.error(t("Der Zeitraum enthält keine Arbeitstage.", "The period contains no working days."))
                         elif modus == "Tage" and art == "Urlaub" and tage > verfuegbar:
@@ -5414,7 +5616,10 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                                     min_value=erf_von_aktuell,
                                     format=DATUMSFORMAT_UI, key="erf_bis")
             erf_kommentar = st.text_input(t("Notiz (optional)", "Note (optional)"), key="erf_kommentar")
-            erf_tage = arbeitstage_zwischen(erf_von, erf_bis)
+            if str(erf_art).casefold() in {"krankheit", "arbeitsunfähig", "arbeitsunfaehig"}:
+                st.caption(t("Bitte keine Diagnose oder medizinischen Details eintragen.",
+                             "Please do not enter diagnoses or medical details."))
+            erf_tage = arbeitstage_fuer_mitarbeiter(erf_person, erf_von, erf_bis) if erf_person else 0
             st.caption(t(f"= {erf_tage} Arbeitstage", f"= {erf_tage} working days"))
 
             if st.button(t("💾 Abwesenheit eintragen", "💾 Record absence"),
@@ -5648,6 +5853,11 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                                   disabled=bool(cfg("autonummer_mitarbeiter")), key=f"neu_ma_nr_{_ma_form_version}")
             ma_aktiv = m3.selectbox(t("Status", "Status"), [t("Aktiv", "Active"), t("Inaktiv", "Inactive")],
                                     key=f"neu_ma_aktiv_{_ma_form_version}")
+            m1, m2 = st.columns(2)
+            ma_eintritt = m1.date_input(t("Eintrittsdatum", "Start date"), value=None,
+                                        format=DATUMSFORMAT_UI, key=f"neu_ma_eintritt_{_ma_form_version}")
+            ma_austritt = m2.date_input(t("Austrittsdatum (optional)", "End date (optional)"), value=None,
+                                        format=DATUMSFORMAT_UI, key=f"neu_ma_austritt_{_ma_form_version}")
             m1, m2, m3 = st.columns(3)
             ma_urlaub = m1.number_input(t("Urlaubstage/Jahr", "Vacation days/year"), min_value=0, max_value=60, value=30, step=1, key=f"neu_ma_urlaub_{_ma_form_version}")
             ma_rest = m2.number_input(t("Resturlaub Vorjahr", "Carry-over vacation"), min_value=0, max_value=60, value=0, step=1, key=f"neu_ma_rest_{_ma_form_version}")
@@ -5658,6 +5868,9 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                     st.session_state.mitarbeiter_stammdaten, "Personalnummer", cfg("prefix_mitarbeiter"), cfg("nummern_stellen"))
                 if not name:
                     st.error(t("Bitte einen Namen eingeben.", "Please enter a name."))
+                elif ma_eintritt and ma_austritt and ma_austritt < ma_eintritt:
+                    st.error(t("Das Austrittsdatum darf nicht vor dem Eintrittsdatum liegen.",
+                               "The end date must not be before the start date."))
                 elif st.session_state.mitarbeiter_stammdaten["Mitarbeiter"].fillna("").astype(str).str.strip().str.casefold().eq(name.casefold()).any():
                     st.error(t("Dieser Mitarbeitername ist bereits vorhanden.", "This employee name already exists."))
                 elif not eindeutige_nummer_pruefen(st.session_state.mitarbeiter_stammdaten, "Personalnummer", nummer):
@@ -5665,6 +5878,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                 else:
                     datensatz = {
                         "MA-ID": f"ma-{uuid.uuid4().hex[:6]}", "Mitarbeiter": name, "Personalnummer": nummer,
+                        "Eintrittsdatum": ma_eintritt, "Austrittsdatum": ma_austritt,
                         "Wochenstunden": 0.0, "Urlaub_Pro_Jahr": int(ma_urlaub), "Resturlaub_Vorjahr": int(ma_rest),
                         "Nachtrag_Std_Limit": float(ma_nachtrag or 0), "Aktiv": ma_aktiv == t("Aktiv", "Active"),
                     }
@@ -6719,9 +6933,35 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                        "Determines regional holidays, e.g. Corpus Christi or Reformation Day."),
             )
 
+            mariae_himmelfahrt_by = bool(cfg("mariae_himmelfahrt_by"))
+            if feiertage_aktiv and bundesland == "BY":
+                mariae_himmelfahrt_by = st.toggle(
+                    t("Mariä Himmelfahrt (15.08.) am Betriebsort berücksichtigen",
+                      "Consider Assumption Day (15 Aug) at the company location"),
+                    value=bool(cfg("mariae_himmelfahrt_by")),
+                    help=t("In Bayern ist der 15.08. nur in den gesetzlich festgestellten Gemeinden Feiertag.",
+                           "In Bavaria, 15 August is a public holiday only in the legally designated municipalities."),
+                    key="mariae_himmelfahrt_by_widget",
+                )
+
+            urlaub_eintritt_burlg = st.toggle(
+                t("Urlaubsanspruch bei Eintritt im laufenden Jahr nach BUrlG-Grundmodell berechnen",
+                  "Calculate leave entitlement for mid-year starters using the BUrlG base model"),
+                value=bool(cfg("urlaub_eintritt_burlg")),
+                help=t("Berücksichtigt die sechsmonatige Wartezeit und Teilurlaub nach §§ 4–5 BUrlG. "
+                       "Tarif-/Arbeitsverträge können für Mehrurlaub abweichen.",
+                       "Considers the six-month waiting period and partial leave under German law. "
+                       "Collective/employment agreements may differ for additional leave."),
+                key="urlaub_eintritt_burlg_widget",
+            )
+
             if feiertage_aktiv:
+                # Vorschau soll den noch nicht gespeicherten Toggle sofort zeigen.
+                _alt_maria = st.session_state.config.get("mariae_himmelfahrt_by", False)
+                st.session_state.config["mariae_himmelfahrt_by"] = bool(mariae_himmelfahrt_by)
                 jahr = date.today().year
                 liste = feiertage_benannt(jahr, bundesland)
+                st.session_state.config["mariae_himmelfahrt_by"] = _alt_maria
                 werktags = [x for x in liste if x[0].weekday() < 5]
                 with st.expander(t(f"📅 Feiertage {jahr} in {BUNDESLAENDER[bundesland]} "
                                    f"({len(werktags)} an Werktagen)",
@@ -6735,10 +6975,9 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                     ])
                     st.dataframe(vorschau, use_container_width=True, hide_index=True)
                     if bundesland == "BY":
-                        st.caption(t("Hinweis: Mariä Himmelfahrt gilt in Bayern nur in überwiegend "
-                                     "katholischen Gemeinden und ist hier nicht enthalten.",
-                                     "Note: Assumption Day only applies in predominantly Catholic "
-                                     "municipalities in Bavaria and is not included here."))
+                        st.caption(t(
+                            "Mariä Himmelfahrt wird entsprechend der obigen Standort-Einstellung berücksichtigt.",
+                            "Assumption Day is considered according to the location setting above."))
                     if bundesland in ("SN", "TH"):
                         st.caption(t("Hinweis: Fronleichnam gilt in einzelnen Gemeinden und ist hier "
                                      "nicht enthalten.",
@@ -6788,7 +7027,10 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
             "pause_schwelle_2": float(schwelle_2), "pause_dauer_2": int(dauer_2),
             "urlaub_in_arbeitstagen": bool(urlaub_arbeitstage),
             "feiertage_beruecksichtigen": bool(feiertage_aktiv),
-            "bundesland": str(bundesland), "nachtschicht_erlaubt": bool(nachtschicht),
+            "bundesland": str(bundesland),
+            "mariae_himmelfahrt_by": bool(mariae_himmelfahrt_by),
+            "urlaub_eintritt_burlg": bool(urlaub_eintritt_burlg),
+            "nachtschicht_erlaubt": bool(nachtschicht),
             "live_stempeln_aktiv": bool(live_stempeln),
             "hoechstarbeitszeit_std": float(hoechst_std),
             "hoechstarbeitszeit_blockieren": bool(hoechst_blockieren),
@@ -6830,6 +7072,8 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                     "urlaub_in_arbeitstagen": urlaub_arbeitstage,
                     "feiertage_beruecksichtigen": feiertage_aktiv,
                     "bundesland": bundesland,
+                    "mariae_himmelfahrt_by": bool(mariae_himmelfahrt_by),
+                    "urlaub_eintritt_burlg": bool(urlaub_eintritt_burlg),
                     "nachtschicht_erlaubt": nachtschicht,
                     "hoechstarbeitszeit_std": float(hoechst_std),
                     "hoechstarbeitszeit_blockieren": bool(hoechst_blockieren),
