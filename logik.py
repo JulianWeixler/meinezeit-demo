@@ -266,6 +266,7 @@ class Buchung:
     datum: date
     kommen: time
     gehen: time | None = None      # None = laufende Buchung ohne Ende
+    netto: float = 0.0             # bezahlte Stunden ohne Pause
 
 
 def _zeitfenster(buchung: Buchung, nachtschicht_erlaubt: bool = True):
@@ -332,6 +333,64 @@ def darf_nachtragen(zeitpunkt: datetime, limit_stunden: float,
                     jetzt: datetime | None = None) -> bool:
     jetzt = jetzt or datetime.now()
     return nachtrag_grenze(limit_stunden, jetzt) <= zeitpunkt <= jetzt
+
+
+# ------------------------------------------------------------
+# Arbeitsschutz: Höchstarbeitszeit und Ruhezeit
+# ------------------------------------------------------------
+# § 3 ArbZG begrenzt die werktägliche Arbeitszeit auf acht Stunden, verlängerbar
+# auf zehn. § 5 ArbZG verlangt nach Arbeitsende eine ununterbrochene Ruhezeit.
+# Die Grenzwerte sind einstellbar, weil abweichende Tarifregelungen möglich sind.
+
+STANDARD_HOECHSTARBEITSZEIT = 10.0
+STANDARD_RUHEZEIT = 11.0
+
+
+def tagessumme(buchungen: list, tag: date, ausser_id: str = "") -> float:
+    """Summe der Nettostunden eines Tages."""
+    summe = 0.0
+    for b in buchungen or []:
+        if ausser_id and b.id == ausser_id:
+            continue
+        if b.datum == tag:
+            summe += float(b.netto or 0.0)
+    return round(summe, 2)
+
+
+def hoechstarbeitszeit_ueberschritten(stunden: float,
+                                      grenze: float = STANDARD_HOECHSTARBEITSZEIT) -> float:
+    """Überschreitung in Stunden; 0.0, wenn die Grenze eingehalten ist."""
+    ueber = round(float(stunden) - float(grenze), 2)
+    return ueber if ueber > 0 else 0.0
+
+
+def ruhezeit_verletzung(neu: Buchung, bestehende: list,
+                        mindest_stunden: float = STANDARD_RUHEZEIT,
+                        nachtschicht_erlaubt: bool = True):
+    """Prüft die Ruhezeit zur vorigen und zur folgenden Buchung.
+
+    Gibt (bestehende Buchung, tatsächliche Ruhezeit in Stunden) zurück, wenn die
+    Pause zwischen zwei Schichten kürzer ist als vorgeschrieben – sonst None.
+    Überlappungen prüft `ueberschneidung`, hier geht es nur um die Lücke dazwischen.
+    """
+    neu_start, neu_ende = _zeitfenster(neu, nachtschicht_erlaubt)
+    if neu_start is None or neu_ende is None:
+        return None
+    for alt in bestehende or []:
+        if alt.id == neu.id:
+            continue
+        alt_start, alt_ende = _zeitfenster(alt, nachtschicht_erlaubt)
+        if alt_start is None or alt_ende is None or alt_ende == alt_start:
+            continue
+        if alt_ende <= neu_start:
+            luecke = (neu_start - alt_ende).total_seconds() / 3600.0
+        elif neu_ende <= alt_start:
+            luecke = (alt_start - neu_ende).total_seconds() / 3600.0
+        else:
+            continue                      # Überlappung, nicht Sache dieser Prüfung
+        if luecke + 1e-9 < float(mindest_stunden):
+            return alt, round(luecke, 2)
+    return None
 
 
 # ============================================================

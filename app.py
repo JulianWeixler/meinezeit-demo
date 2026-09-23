@@ -1646,6 +1646,13 @@ STANDARD_CONFIG = {
     "bundesland": "BY",
     "nachtschicht_erlaubt": True,
     "live_stempeln_aktiv": True,
+    # Arbeitsschutz: Grenzwerte nach ArbZG, einstellbar wegen abweichender Tarifregeln
+    "hoechstarbeitszeit_std": 10.0,
+    "hoechstarbeitszeit_blockieren": False,
+    "ruhezeit_std": 11.0,
+    "ruhezeit_pruefen": True,
+    # Aufbewahrung: mindestens zwei Jahre (§ 16 ArbZG), danach loeschbar (DSGVO)
+    "aufbewahrung_jahre": 3,
     "passwort_mindestlaenge": 10,
     "max_login_versuche": 5,
     "sperrdauer_minuten": 5,
@@ -1973,6 +1980,27 @@ def branche_label(schluessel: str) -> str:
 def projekt_label() -> str:
     paar = branche()["projekt_label"]
     return paar[1] if ist_englisch() else paar[0]
+
+
+def projekt_label_alle() -> str:
+    """Beschriftung der Sammelauswahl, z. B. "Alle Projekte".
+
+    "Alle" plus dem Feldnamen im Singular ergäbe "Alle Projekt". Deshalb je
+    Branche eine eigene Mehrzahlform, mit Rückfall auf eine neutrale Formulierung.
+    """
+    mehrzahl = {
+        "Kostenstelle / Projekt": ("Alle Projekte", "All projects"),
+        "Baustelle / Auftrag": ("Alle Baustellen", "All sites"),
+        "Gruppe / Bereich": ("Alle Gruppen", "All groups"),
+        "Station / Tour": ("Alle Stationen", "All wards"),
+        "Betrieb / Schicht": ("Alle Schichten", "All shifts"),
+        "Filiale / Abteilung": ("Alle Filialen", "All stores"),
+        "Projekt": ("Alle Projekte", "All projects"),
+    }
+    schluessel = branche()["projekt_label"][0]
+    if schluessel in mehrzahl:
+        return t(*mehrzahl[schluessel])
+    return t("Alle", "All")
 
 
 def kunden_projekte_aktiv() -> bool:
@@ -2359,8 +2387,48 @@ def buchungen_von(name: str, ausser_id: str = "") -> list:
         if kommen is None:
             continue
         liste.append(Buchung(id=str(zeile["ID"]), datum=zeile["Datum"], kommen=kommen,
-                             gehen=parse_zeit(zeile["Gehen"])))
+                             gehen=parse_zeit(zeile["Gehen"]),
+                             netto=float(pd.to_numeric(zeile.get("Netto (Std)"), errors="coerce") or 0.0)))
     return liste
+
+
+def pruefe_arbeitsschutz(name: str, datum: date, kommen: time, gehen: time | None,
+                         netto: float, eigene_id: str = "", bestand: list | None = None) -> tuple:
+    """Prüft Höchstarbeitszeit und Ruhezeit einer Buchung.
+
+    Gibt (harte_fehler, hinweise) zurück. Ob eine Überschreitung der
+    Höchstarbeitszeit das Speichern verhindert oder nur gemeldet wird, legt die
+    Leitung in den Einstellungen fest – manche Betriebe brauchen die Erfassung
+    auch dann, wenn die Grenze im Einzelfall gerissen wurde.
+    """
+    fehler: list = []
+    hinweise: list = []
+    vorhandene = bestand if bestand is not None else buchungen_von(name, eigene_id)
+
+    grenze = float(cfg("hoechstarbeitszeit_std") or 0)
+    if grenze > 0 and gehen is not None:
+        gesamt = logik.tagessumme(vorhandene, datum, ausser_id=eigene_id) + float(netto or 0)
+        ueber = logik.hoechstarbeitszeit_ueberschritten(gesamt, grenze)
+        if ueber:
+            text = t(f"Höchstarbeitszeit überschritten: {gesamt:.2f} Std. an diesem Tag "
+                     f"(erlaubt {grenze:.0f} Std., also {ueber:.2f} Std. zu viel).",
+                     f"Maximum working time exceeded: {gesamt:.2f} h on this day "
+                     f"(limit {grenze:.0f} h, {ueber:.2f} h too many).")
+            (fehler if cfg("hoechstarbeitszeit_blockieren") else hinweise).append(text)
+
+    ruhe = float(cfg("ruhezeit_std") or 0)
+    if cfg("ruhezeit_pruefen") and ruhe > 0 and gehen is not None:
+        treffer = logik.ruhezeit_verletzung(
+            Buchung(str(eigene_id or "__neu__"), datum, kommen, gehen, netto=float(netto or 0)),
+            vorhandene, ruhe, cfg("nachtschicht_erlaubt"))
+        if treffer:
+            andere, luecke = treffer
+            hinweise.append(t(
+                f"Ruhezeit zu kurz: nur {luecke:.1f} Std. zur Buchung am "
+                f"{andere.datum.strftime(DATUMSFORMAT)} (vorgeschrieben {ruhe:.0f} Std.).",
+                f"Rest period too short: only {luecke:.1f} h to the entry on "
+                f"{andere.datum.strftime(DATUMSFORMAT)} (required {ruhe:.0f} h)."))
+    return fehler, hinweise
 
 
 def pruefe_ueberschneidung(name: str, datum: date, kommen: time, gehen: time | None,
@@ -3693,16 +3761,24 @@ if st.session_state.role == "Mitarbeiter":
                 except ValueError as fehler:
                     st.error(str(fehler))
                 else:
-                    st.session_state.time_logs = zeile_anhaengen(
-                        st.session_state.time_logs,
-                        {"ID": neue_id(), "Mitarbeiter": benutzer, "Datum": m_datum,
-                         "Kommen": m_kommen.strftime(ZEITFORMAT), "Gehen": m_gehen.strftime(ZEITFORMAT),
-                         "Brutto (Std)": brutto, "Pause (Min)": pause, "Netto (Std)": netto,
-                         "Kategorie": m_kategorie, "Kunde-ID": str(m_kunde_id), "Projekt-ID": str(m_projekt_id), "Projekt": str(m_projekt_name).strip(),
-                         "Notiz": str(m_notiz).strip(), "Typ": "Manuell", "Status": "Erfasst"})
-                    speichern("time_logs")
-                    melde(f"Gespeichert: {netto:.2f} Std.", f"Saved: {netto:.2f} h", "💾")
-                    st.rerun()
+                    schutz_fehler, schutz_hinweise = pruefe_arbeitsschutz(
+                        benutzer, m_datum, m_kommen, m_gehen, netto)
+                    if schutz_fehler:
+                        for text in schutz_fehler:
+                            st.error(text)
+                    else:
+                        st.session_state.time_logs = zeile_anhaengen(
+                            st.session_state.time_logs,
+                            {"ID": neue_id(), "Mitarbeiter": benutzer, "Datum": m_datum,
+                             "Kommen": m_kommen.strftime(ZEITFORMAT), "Gehen": m_gehen.strftime(ZEITFORMAT),
+                             "Brutto (Std)": brutto, "Pause (Min)": pause, "Netto (Std)": netto,
+                             "Kategorie": m_kategorie, "Kunde-ID": str(m_kunde_id), "Projekt-ID": str(m_projekt_id), "Projekt": str(m_projekt_name).strip(),
+                             "Notiz": str(m_notiz).strip(), "Typ": "Manuell", "Status": "Erfasst"})
+                        speichern("time_logs")
+                        for text in schutz_hinweise:
+                            melde(text, text, "⚠️")
+                        melde(f"Gespeichert: {netto:.2f} Std.", f"Saved: {netto:.2f} h", "💾")
+                        st.rerun()
 
     # ================= Meine Zeiten =================
     with tab_uebersicht:
@@ -3935,6 +4011,44 @@ if st.session_state.role == "Mitarbeiter":
                         text = t(f"Eingetragen: {eintrag['Neuer Wert']}", f"Added: {eintrag['Neuer Wert']}")
                     st.markdown(f"<small>{zeit_text} · {eintrag['Benutzer']}</small><br>{text}",
                                 unsafe_allow_html=True)
+
+        # Auskunftsrecht nach Art. 15 DSGVO: Jede Person kann eine Kopie ihrer
+        # gespeicherten Daten verlangen. Ein eigener Knopf erspart den Umweg
+        # über die Leitung und erledigt die Anfrage in Sekunden.
+        with st.expander(t("📄 Meine Daten exportieren", "📄 Export my data")):
+            st.caption(t(
+                "Alle zu dir gespeicherten Zeiten, Abwesenheiten und Stammdaten als Excel-Datei. "
+                "Du hast nach Artikel 15 DSGVO Anspruch auf diese Auskunft.",
+                "All working times, absences and personal data stored about you as an Excel file. "
+                "You are entitled to this information under Article 15 GDPR."))
+            if st.button(t("Datei erstellen", "Create file"), key="dsgvo_export", use_container_width=True):
+                try:
+                    puffer = io.BytesIO()
+                    eigene_zeiten = zeiten_abfragen(mitarbeiter=benutzer)
+                    df_vac_alle = st.session_state.vacation_requests
+                    eigene_abw = (df_vac_alle[df_vac_alle["Mitarbeiter"] == benutzer]
+                                  if not df_vac_alle.empty else df_vac_alle)
+                    stamm_zeile = stammdaten_zeile(benutzer)
+                    eigene_stamm = (pd.DataFrame([stamm_zeile]) if stamm_zeile is not None
+                                    else pd.DataFrame())
+                    protokoll_eigen = protokoll_laden(benutzer, date.today() - timedelta(days=365 * 3),
+                                                      date.today(), grenze=5000)
+                    with pd.ExcelWriter(puffer, engine="openpyxl") as writer:
+                        anzeige_df(eigene_zeiten).to_excel(writer, index=False, sheet_name="Arbeitszeiten")
+                        anzeige_df(eigene_abw).to_excel(writer, index=False, sheet_name="Abwesenheiten")
+                        if not eigene_stamm.empty:
+                            eigene_stamm.to_excel(writer, index=False, sheet_name="Stammdaten")
+                        if not protokoll_eigen.empty:
+                            protokoll_eigen.to_excel(writer, index=False, sheet_name="Aenderungen")
+                    st.download_button(
+                        t("⬇️ Herunterladen", "⬇️ Download"), data=puffer.getvalue(),
+                        file_name=f"meine_daten_{date.today():%Y-%m-%d}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key="dsgvo_download", use_container_width=True)
+                except Exception as fehler:
+                    protokolliere("Datenexport fehlgeschlagen", fehler)
+                    st.error(t(f"Die Datei konnte nicht erstellt werden: {fehler}",
+                               f"The file could not be created: {fehler}"))
 
     # ================= Abwesenheit =================
     with tab_abwesenheit:
@@ -4431,17 +4545,25 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                     except ValueError as fehler:
                         st.error(str(fehler))
                     else:
-                        st.session_state.time_logs = zeile_anhaengen(
-                            st.session_state.time_logs,
-                            {"ID": neue_id(), "Mitarbeiter": benutzer, "Datum": m_datum,
-                             "Kommen": m_kommen.strftime(ZEITFORMAT), "Gehen": m_gehen.strftime(ZEITFORMAT),
-                             "Brutto (Std)": brutto, "Pause (Min)": pause, "Netto (Std)": netto,
-                             "Kategorie": m_kategorie, "Kunde-ID": str(admin_nach_kunde_id), "Projekt-ID": str(admin_nach_projekt_id), "Projekt": m_projekt.strip(), "Notiz": m_notiz.strip(),
-                             "Typ": "Manuell", "Status": "Erfasst"})
-                        speichern("time_logs")
-                        melde(f"Zeit gespeichert: {netto:.2f} Std. netto, Pause {pause} Min.",
-                              f"Time saved: {netto:.2f} h net, break {pause} min", "💾")
-                        st.rerun()
+                        schutz_fehler, schutz_hinweise = pruefe_arbeitsschutz(
+                            benutzer, m_datum, m_kommen, m_gehen, netto)
+                        if schutz_fehler:
+                            for text in schutz_fehler:
+                                st.error(text)
+                        else:
+                            st.session_state.time_logs = zeile_anhaengen(
+                                st.session_state.time_logs,
+                                {"ID": neue_id(), "Mitarbeiter": benutzer, "Datum": m_datum,
+                                 "Kommen": m_kommen.strftime(ZEITFORMAT), "Gehen": m_gehen.strftime(ZEITFORMAT),
+                                 "Brutto (Std)": brutto, "Pause (Min)": pause, "Netto (Std)": netto,
+                                 "Kategorie": m_kategorie, "Kunde-ID": str(admin_nach_kunde_id), "Projekt-ID": str(admin_nach_projekt_id), "Projekt": m_projekt.strip(), "Notiz": m_notiz.strip(),
+                                 "Typ": "Manuell", "Status": "Erfasst"})
+                            speichern("time_logs")
+                            for text in schutz_hinweise:
+                                melde(text, text, "⚠️")
+                            melde(f"Zeit gespeichert: {netto:.2f} Std. netto, Pause {pause} Min.",
+                                  f"Time saved: {netto:.2f} h net, break {pause} min", "💾")
+                            st.rerun()
 
             st.markdown(f"#### {t('Meine Abwesenheiten', 'My absences')}")
             anspruch, genehmigt, ausstehend, verfuegbar = get_urlaubs_konto(benutzer)
@@ -4798,6 +4920,55 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                             st.session_state[f"sys_zeit_delete_confirm_{ziel_id}"] = False
                             st.rerun()
 
+        # ---------- Datenpflege: Aufbewahrungsfrist ----------
+        with st.expander(t("🧹 Datenpflege: alte Daten löschen", "🧹 Data maintenance: delete old records")):
+            jahre = int(cfg("aufbewahrung_jahre"))
+            stichtag = date.today() - timedelta(days=365 * jahre)
+            st.caption(t(
+                f"Arbeitszeiten sind mindestens zwei Jahre aufzubewahren (§ 16 ArbZG). "
+                f"Eingestellt sind {jahre} Jahre, also alles vor dem {stichtag.strftime(DATUMSFORMAT)}. "
+                "Die Datenschutz-Grundverordnung verlangt umgekehrt, Daten nicht unbegrenzt zu behalten.",
+                f"Working times must be kept for at least two years. Configured: {jahre} years, "
+                f"i.e. everything before {stichtag.strftime(DATUMSFORMAT)}."))
+
+            alte_zeiten = zeiten_abfragen(bis=stichtag)
+            df_abw = st.session_state.vacation_requests
+            alte_abw = df_abw[df_abw["Enddatum"].apply(
+                lambda d: isinstance(d, date) and d <= stichtag)] if not df_abw.empty else df_abw
+
+            m1, m2 = st.columns(2)
+            m1.metric(t("Zeiteinträge", "Time entries"), len(alte_zeiten))
+            m2.metric(t("Abwesenheiten", "Absences"), len(alte_abw))
+
+            if len(alte_zeiten) == 0 and len(alte_abw) == 0:
+                st.success(t("Keine Daten älter als die Aufbewahrungsfrist.",
+                             "No data older than the retention period."))
+            else:
+                if st.button(t("🗑️ Ältere Daten löschen", "🗑️ Delete older records"),
+                             use_container_width=True, key="aufbewahrung_loeschen"):
+                    st.session_state["_loeschfrage_aufbewahrung"] = list(alte_zeiten["ID"].astype(str))
+                bestaetigt = loeschabfrage(
+                    "aufbewahrung", list(alte_zeiten["ID"].astype(str)),
+                    t(f"{len(alte_zeiten)} Zeiteinträge und {len(alte_abw)} Abwesenheiten vor dem "
+                      f"{stichtag.strftime(DATUMSFORMAT)} endgültig löschen?",
+                      f"Permanently delete {len(alte_zeiten)} time entries and {len(alte_abw)} "
+                      f"absences before {stichtag.strftime(DATUMSFORMAT)}?"),
+                    t("Vorher eine Sicherung anlegen. Die Löschung wird im Änderungsprotokoll vermerkt.",
+                      "Create a backup first. The deletion is recorded in the change log."))
+                if bestaetigt:
+                    ids = set(alte_zeiten["ID"].astype(str))
+                    logs = st.session_state.time_logs
+                    st.session_state.time_logs = logs[
+                        ~logs["ID"].astype(str).isin(ids)].reset_index(drop=True)
+                    speichern("time_logs")
+                    abw_ids = set(alte_abw["ID"].astype(str))
+                    st.session_state.vacation_requests = df_abw[
+                        ~df_abw["ID"].astype(str).isin(abw_ids)].reset_index(drop=True)
+                    speichern("vacation_requests")
+                    melde(f"{len(ids)} Zeiteinträge und {len(abw_ids)} Abwesenheiten gelöscht.",
+                          f"{len(ids)} time entries and {len(abw_ids)} absences deleted.", "🧹")
+                    st.rerun()
+
         # ---------- Änderungsprotokoll ----------
         with st.expander(t("📜 Änderungsprotokoll", "📜 Change log")):
             st.caption(t(
@@ -4885,7 +5056,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                     _ad_pdf = aktive_projekte_df(None if ad_kunde == "__ALLE__" else ad_kunde)
                     _ad_pids = ["__ALLE__"] + (_ad_pdf["Projekt-ID"].astype(str).tolist() if not _ad_pdf.empty else [])
                     ad_projekt = f2.selectbox(projekt_label(), _ad_pids,
-                        format_func=lambda x: t("Alle", "All") + " " + projekt_label().lower() if x == "__ALLE__" else projekt_label_id(x), key="aus_zeiten_projekt")
+                        format_func=lambda x: projekt_label_alle() if x == "__ALLE__" else projekt_label_id(x), key="aus_zeiten_projekt")
 
                 gefiltert = zeiten_von(None, von, bis)
                 if auswahl_ma:
@@ -4997,7 +5168,7 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                 aus_kunde = st.selectbox(t("Kunde", "Customer"), kunden_ids_a, format_func=lambda x: t("Alle Kunden", "All customers") if x == "__ALLE__" else kunden_label(x), key="aus_kunde")
                 proj_df_a = aktive_projekte_df(aus_kunde)
                 proj_ids_a = ["__ALLE__"] + (proj_df_a["Projekt-ID"].astype(str).tolist() if not proj_df_a.empty else [])
-                aus_projekt = st.selectbox(projekt_label(), proj_ids_a, format_func=lambda x: t("Alle Projekte", "All projects") if x == "__ALLE__" else projekt_label_id(x), key="aus_projekt")
+                aus_projekt = st.selectbox(projekt_label(), proj_ids_a, format_func=lambda x: projekt_label_alle() if x == "__ALLE__" else projekt_label_id(x), key="aus_projekt")
                 ma_ids_a = ["__ALLE__"] + [str(x) for x in aktive_mitarbeiter()]
                 aus_ma = st.selectbox(t("Mitarbeiter", "Employee"), ma_ids_a, format_func=lambda x: t("Alle Mitarbeiter", "All employees") if x == "__ALLE__" else x, key="aus_ma")
                 df_a = zeiten_von(None, avon, abis).copy()
@@ -6149,36 +6320,68 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                         st.rerun()
 
                 st.markdown("---")
+                # Beide Aktionen in gleich hohen Kästen mit eigener Überschrift.
+                # Vorher stand der Sperr-Knopf allein in der rechten Spalte neben
+                # einem Textfeld – er wirkte dadurch wie versehentlich abgelegt.
                 c1, c2 = st.columns(2)
+
                 with c1:
-                    reset_pw = st.text_input(t("Neues Startpasswort", "New initial password"),
-                                             START_PASSWORT, key="reset_pw")
-                    if st.button(t("🔄 Passwort zurücksetzen", "🔄 Reset password"),
-                                 use_container_width=True):
-                        if len(reset_pw) < int(cfg("passwort_mindestlaenge")):
-                            st.error(t(f"Mindestens {int(cfg('passwort_mindestlaenge'))} Zeichen erforderlich.",
-                                       f"At least {MIN_PASSWORTLAENGE} characters required."))
-                        else:
-                            passwort_setzen(ziel, reset_pw, wechsel_erzwingen=True)
-                            melde(f"Passwort für „{ziel}“ zurückgesetzt.",
-                                  f"Password for “{ziel}” has been reset.", "🔄")
-                            st.rerun()
+                    with st.container(border=True):
+                        st.markdown(f"**{t('🔄 Passwort zurücksetzen', '🔄 Reset password')}**")
+                        st.caption(t("Die Person muss das Passwort beim nächsten Login ändern.",
+                                     "The user must change the password at next sign-in."))
+                        reset_pw = st.text_input(t("Neues Startpasswort", "New initial password"),
+                                                 START_PASSWORT, key="reset_pw")
+                        if st.button(t("Passwort zurücksetzen", "Reset password"),
+                                     use_container_width=True, key="konto_pw_reset"):
+                            if len(reset_pw) < int(cfg("passwort_mindestlaenge")):
+                                st.error(t(f"Mindestens {int(cfg('passwort_mindestlaenge'))} Zeichen erforderlich.",
+                                           f"At least {int(cfg('passwort_mindestlaenge'))} characters required."))
+                            else:
+                                passwort_setzen(ziel, reset_pw, wechsel_erzwingen=True)
+                                melde(f"Passwort für „{ziel}“ zurückgesetzt.",
+                                      f"Password for “{ziel}” has been reset.", "🔄")
+                                st.rerun()
+
                 with c2:
-                    label = t("🚫 Konto sperren", "🚫 Block account") if aktiv else \
-                            t("✅ Konto entsperren", "✅ Unblock account")
-                    if st.button(label, use_container_width=True, disabled=ist_eigenes and aktiv):
-                        if aktiv and str(ziel_zeile["Rolle"]) == "Leitung / Admin" and admin_anzahl <= 1:
-                            st.error(t("Das letzte aktive Admin-Konto kann nicht gesperrt werden.",
-                                       "The last active admin account cannot be blocked."))
+                    with st.container(border=True):
+                        st.markdown(f"**{t('🔐 Kontostatus', '🔐 Account status')}**")
+                        # Grund für eine Sperre des Knopfes vorab ermitteln, damit
+                        # niemand erst nach dem Klick eine Fehlermeldung sieht
+                        letzter_admin = (aktiv and str(ziel_zeile["Rolle"]) == "Leitung / Admin"
+                                         and admin_anzahl <= 1)
+                        gesperrt_grund = ""
+                        if ist_eigenes and aktiv:
+                            gesperrt_grund = t("Das eigene Konto kann nicht gesperrt werden.",
+                                               "You cannot block your own account.")
+                        elif letzter_admin:
+                            gesperrt_grund = t("Das letzte aktive Admin-Konto kann nicht gesperrt werden.",
+                                               "The last active admin account cannot be blocked.")
+
+                        if aktiv:
+                            st.markdown(
+                                f"<div class='badge badge-gruen'>🟢 {t('Aktiv – Anmeldung möglich', 'Active – sign-in possible')}</div>",
+                                unsafe_allow_html=True)
                         else:
+                            st.markdown(
+                                f"<div class='badge badge-rot'>🚫 {t('Gesperrt – keine Anmeldung möglich', 'Blocked – no sign-in possible')}</div>",
+                                unsafe_allow_html=True)
+                        st.caption(t("Gesperrte Konten bleiben samt ihrer Zeiten erhalten.",
+                                     "Blocked accounts keep all their recorded times."))
+
+                        label = t("🚫 Konto sperren", "🚫 Block account") if aktiv else \
+                                t("✅ Konto entsperren", "✅ Unblock account")
+                        if st.button(label, use_container_width=True, key="konto_status_umschalten",
+                                     disabled=bool(gesperrt_grund),
+                                     type="primary" if not aktiv else "secondary"):
                             maske = st.session_state.benutzer["Benutzername"].astype(str) == ziel
                             st.session_state.benutzer.loc[maske, "Aktiv"] = not aktiv
                             speichern("benutzer")
-                            melde("Kontostatus geändert.", "Account status changed.", "🔐")
+                            melde("Konto gesperrt." if aktiv else "Konto entsperrt.",
+                                  "Account blocked." if aktiv else "Account unblocked.", "🔐")
                             st.rerun()
-                    if ist_eigenes and aktiv:
-                        st.caption(t("Das eigene Konto kann nicht gesperrt werden.",
-                                     "You cannot block your own account."))
+                        if gesperrt_grund:
+                            st.caption(gesperrt_grund)
 
                 if systemadmin_vollzugriff:
                     st.markdown("---")
@@ -6545,6 +6748,39 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
             nachtschicht = st.toggle(t("Schichten über Mitternacht zulassen",
                                        "Allow shifts across midnight"), cfg("nachtschicht_erlaubt"))
 
+        unterbereich_titel("🛡️", t("Arbeitsschutz", "Working time protection"),
+                           t("Grenzwerte nach Arbeitszeitgesetz. Abweichende Tarifregelungen "
+                             "lassen sich hier eintragen.",
+                             "Statutory limits. Deviating collective agreements can be entered here."))
+        with st.container(border=True):
+            a1, a2 = st.columns(2)
+            hoechst_std = a1.number_input(
+                t("Höchstarbeitszeit pro Tag (Std.)", "Maximum working time per day (h)"),
+                0.0, 24.0, float(cfg("hoechstarbeitszeit_std")), 0.5,
+                help=t("§ 3 ArbZG: acht Stunden, verlängerbar auf zehn. 0 schaltet die Prüfung ab.",
+                       "German law: eight hours, extendable to ten. 0 disables the check."))
+            hoechst_blockieren = a2.toggle(
+                t("Überschreitung verhindern", "Prevent exceeding"),
+                bool(cfg("hoechstarbeitszeit_blockieren")),
+                help=t("Aus: Die Zeit wird gespeichert und nur gemeldet. Ein: Das Speichern wird "
+                       "abgelehnt – dann fehlt die Zeit aber in der Erfassung.",
+                       "Off: the entry is saved and only flagged. On: saving is refused – but then "
+                       "the time is missing from the records."))
+            a3, a4 = st.columns(2)
+            ruhezeit_std = a3.number_input(
+                t("Mindestruhezeit zwischen Schichten (Std.)", "Minimum rest between shifts (h)"),
+                0.0, 24.0, float(cfg("ruhezeit_std")), 0.5,
+                help=t("§ 5 ArbZG: elf Stunden ununterbrochen.", "German law: eleven hours."))
+            ruhezeit_pruefen = a4.toggle(t("Ruhezeit prüfen", "Check rest period"),
+                                         bool(cfg("ruhezeit_pruefen")))
+            aufbewahrung = st.number_input(
+                t("Aufbewahrung der Zeiten (Jahre)", "Retention of time records (years)"),
+                2, 10, int(cfg("aufbewahrung_jahre")), 1,
+                help=t("§ 16 ArbZG verlangt mindestens zwei Jahre. Ältere Daten lassen sich unter "
+                       "„Datenpflege“ löschen – die DSGVO verlangt, sie nicht unbegrenzt zu behalten.",
+                       "At least two years are required. Older data can be deleted under "
+                       "“Data maintenance”."))
+
         # Ungespeicherte Änderungen erkennen: Formularwerte gegen den gespeicherten
         # Stand vergleichen. Das Ergebnis füllt die Warnleiste oben in der App.
         formular_werte = {
@@ -6554,6 +6790,11 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
             "feiertage_beruecksichtigen": bool(feiertage_aktiv),
             "bundesland": str(bundesland), "nachtschicht_erlaubt": bool(nachtschicht),
             "live_stempeln_aktiv": bool(live_stempeln),
+            "hoechstarbeitszeit_std": float(hoechst_std),
+            "hoechstarbeitszeit_blockieren": bool(hoechst_blockieren),
+            "ruhezeit_std": float(ruhezeit_std),
+            "ruhezeit_pruefen": bool(ruhezeit_pruefen),
+            "aufbewahrung_jahre": int(aufbewahrung),
         }
         if systemadmin_vollzugriff:
             formular_werte.update({
@@ -6590,6 +6831,11 @@ elif rolle_erlaubt("Leitung / Admin") or (rolle_erlaubt("Systemadministrator") a
                     "feiertage_beruecksichtigen": feiertage_aktiv,
                     "bundesland": bundesland,
                     "nachtschicht_erlaubt": nachtschicht,
+                    "hoechstarbeitszeit_std": float(hoechst_std),
+                    "hoechstarbeitszeit_blockieren": bool(hoechst_blockieren),
+                    "ruhezeit_std": float(ruhezeit_std),
+                    "ruhezeit_pruefen": bool(ruhezeit_pruefen),
+                    "aufbewahrung_jahre": int(aufbewahrung),
                     "live_stempeln_aktiv": live_stempeln,
                 })
                 if systemadmin_vollzugriff:
